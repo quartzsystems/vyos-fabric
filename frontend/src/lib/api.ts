@@ -597,6 +597,41 @@ export interface DeviceSystemConfig {
   current_time: string | null;
 }
 
+export interface LoadAverage {
+  one: number | null;
+  five: number | null;
+  fifteen: number | null;
+}
+
+export interface MemoryInfo {
+  total_bytes: number | null;
+  used_bytes: number | null;
+  free_bytes: number | null;
+  used_pct: number | null;
+}
+
+export interface StorageMount {
+  filesystem: string;
+  size_bytes: number | null;
+  used_bytes: number | null;
+  avail_bytes: number | null;
+  used_pct: number | null;
+  mount: string | null;
+}
+
+/// Live operational system info for the dashboard pod. All fields best-effort (may be null).
+export interface DeviceSystemInfo {
+  version: string | null;
+  release_train: string | null;
+  built_on: string | null;
+  hardware_vendor: string | null;
+  hardware_model: string | null;
+  uptime: string | null;
+  load: LoadAverage;
+  memory: MemoryInfo;
+  storage: StorageMount[];
+}
+
 export interface SystemUpdate {
   hostname?: string;
   domain_name?: string;
@@ -954,6 +989,24 @@ export function fetchCgnat(deviceId: string): Promise<CgnatConfig> {
 
 export function fetchSystem(deviceId: string): Promise<DeviceSystemConfig> {
   return request(`/routers/${deviceId}/system`);
+}
+
+/// Live operational system info (version, hardware, uptime, load, memory, disk).
+export function fetchSystemInfo(deviceId: string): Promise<DeviceSystemInfo> {
+  return request(`/routers/${deviceId}/system/info`);
+}
+
+export interface InterfaceStat {
+  name: string;
+  rx_bytes: number | null;
+  rx_packets: number | null;
+  tx_bytes: number | null;
+  tx_packets: number | null;
+}
+
+/// Live RX/TX counters for every interface (from `show interfaces counters`).
+export function fetchInterfaceStats(deviceId: string): Promise<InterfaceStat[]> {
+  return request(`/routers/${deviceId}/interfaces/stats`);
 }
 
 export function stageSystem(deviceId: string, body: SystemUpdate): Promise<ConfigChange[]> {

@@ -1,8 +1,9 @@
 //! Live interface inventory (ethernet + VLAN sub-interfaces), read from device config.
 //! Merged into the `/routers` nest, so routes live under `/routers/{id}/interfaces/...`.
 
-use axum::{extract::{Path, State}, routing::{get, post}, Json, Router};
-use serde_json::Value;
+use axum::{extract::{Path, Query, State}, routing::{get, post}, Json, Router};
+use serde::Deserialize;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{
@@ -10,10 +11,11 @@ use crate::{
     error::{AppError, Result},
     models::{
         BondingInterface, BridgeInterface, ConfigChange, DummyInterface, EthernetConfigUpdate,
-        EthernetInterface, GeneveInterface, L2tpv3Interface, LoopbackInterface, MacsecInterface,
-        MacvlanInterface, NewConfigChange, OpenvpnInterface, PppoeInterface, SstpcInterface,
-        TunnelInterface, VethInterface, VlanConfigUpdate, VlanDelete, VlanInterface, VtiInterface,
-        VxlanInterface, WireguardInterface, WlanInterface, WwanInterface,
+        EthernetInterface, GeneveInterface, InterfaceStat, L2tpv3Interface, LoopbackInterface,
+        MacsecInterface, MacvlanInterface, NewConfigChange, OpenvpnInterface, PppoeInterface,
+        SstpcInterface, TunnelInterface, VethInterface, VlanConfigUpdate, VlanDelete,
+        VlanInterface, VtiInterface, VxlanInterface, WireguardInterface, WlanInterface,
+        WwanInterface,
     },
     state::AppState,
 };
@@ -47,6 +49,62 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/interfaces/vxlan", get(list_vxlan))
         .route("/{id}/interfaces/wlan", get(list_wlan))
         .route("/{id}/interfaces/wwan", get(list_wwan))
+        .route("/{id}/interfaces/stats", get(list_interface_stats))
+}
+
+// ── Live RX/TX counters ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct StatsQuery {
+    /// When present (e.g. `?debug=1`), include the raw command output for parser tuning.
+    debug: Option<String>,
+}
+
+/// Parse `show interfaces counters`. Columns are `Interface Rx-Packets Rx-Bytes
+/// Tx-Packets Tx-Bytes`; the header and separator rows are skipped because their
+/// non-name columns don't parse as numbers.
+fn parse_interface_counters(text: &str) -> Vec<InterfaceStat> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 5 {
+            continue;
+        }
+        let nums: Vec<Option<u64>> = cols[1..5]
+            .iter()
+            .map(|c| c.replace(',', "").parse::<u64>().ok())
+            .collect();
+        if nums.iter().any(Option::is_none) {
+            continue; // header / separator / non-data row
+        }
+        out.push(InterfaceStat {
+            name: cols[0].to_string(),
+            rx_packets: nums[0],
+            rx_bytes: nums[1],
+            tx_packets: nums[2],
+            tx_bytes: nums[3],
+        });
+    }
+    out
+}
+
+async fn list_interface_stats(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Query(q): Query<StatsQuery>,
+) -> Result<Json<Value>> {
+    let client = fetch_client(&state, &claims, id).await?;
+    let resp = client.show(&["interfaces", "counters"]).await.map_err(gateway_err)?;
+    let text = resp["data"].as_str().unwrap_or("");
+    let stats = parse_interface_counters(text);
+
+    let body = if q.debug.is_some() {
+        json!({ "stats": stats, "raw": text })
+    } else {
+        serde_json::to_value(&stats).unwrap_or_else(|_| json!([]))
+    };
+    Ok(Json(body))
 }
 
 // ── parse helpers ──────────────────────────────────────────────────────────────

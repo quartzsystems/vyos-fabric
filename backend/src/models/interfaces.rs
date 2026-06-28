@@ -14,6 +14,16 @@ pub struct EthernetInterface {
     pub vlan_count: i32,
 }
 
+/// Live RX/TX counters for an interface, from `show interfaces counters`.
+#[derive(Debug, Serialize)]
+pub struct InterfaceStat {
+    pub name: String,
+    pub rx_bytes: Option<u64>,
+    pub rx_packets: Option<u64>,
+    pub tx_bytes: Option<u64>,
+    pub tx_packets: Option<u64>,
+}
+
 /// A VLAN sub-interface (`ethN vif <id>`), rendered as `ethN.<id>`.
 #[derive(Debug, Serialize)]
 pub struct VlanInterface {

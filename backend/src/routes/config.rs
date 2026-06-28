@@ -2,11 +2,14 @@
 //!
 //! Routes here are merged into the `/routers` nest, so they live under `/routers/{id}/...`.
 
+use std::collections::BTreeMap;
+
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     routing::{get, post},
     Json, Router,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -14,8 +17,8 @@ use crate::{
     auth::{authorize_router, AuthUser},
     error::{AppError, Result},
     models::{
-        CommitWithChanges, ConfigChange, ConfigCommit, DeviceSystemConfig,
-        NewConfigChange, NtpServerLive, SystemConfigUpdate,
+        CommitWithChanges, ConfigChange, ConfigCommit, DeviceSystemConfig, DeviceSystemInfo,
+        LoadAverage, MemoryInfo, NewConfigChange, NtpServerLive, StorageMount, SystemConfigUpdate,
     },
     state::AppState,
     vyos::client::{VyosClient, VyosVersion},
@@ -31,6 +34,7 @@ const COMMIT_COLS: &str =
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/{id}/system", get(get_system))
+        .route("/{id}/system/info", get(get_system_info))
         .route("/{id}/system/stage", post(stage_system))
         .route("/{id}/changes", get(list_changes).delete(discard_all))
         .route("/{id}/changes/{change_id}", axum::routing::delete(discard_one))
@@ -149,6 +153,246 @@ async fn get_system(
         ntp_servers,
         current_time,
     }))
+}
+
+// ── Live operational info (dashboard pod) ─────────────────────────────────────
+
+#[derive(Deserialize)]
+struct InfoQuery {
+    /// When present (e.g. `?debug=1`), echo the raw command outputs for parser tuning.
+    debug: Option<String>,
+}
+
+/// Run an operational `show` command and return its text payload, or `None` on any
+/// failure (unreachable, API error, missing data) — this endpoint is all best-effort.
+async fn show_text(client: &VyosClient, path: &[&str]) -> Option<String> {
+    match client.show(path).await {
+        Ok(resp) if resp["success"].as_bool() == Some(true) => {
+            resp["data"].as_str().map(|s| s.to_string())
+        }
+        _ => None,
+    }
+}
+
+async fn get_system_info(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Query(q): Query<InfoQuery>,
+) -> Result<Json<DeviceSystemInfo>> {
+    let client = fetch_client(&state, &claims, id).await?;
+
+    // Independent best-effort reads — fan them out concurrently.
+    let (version_txt, uptime_txt, memory_txt, storage_txt) = tokio::join!(
+        show_text(&client, &["version"]),
+        show_text(&client, &["system", "uptime"]),
+        show_text(&client, &["system", "memory"]),
+        show_text(&client, &["system", "storage"]),
+    );
+
+    let (version, release_train, built_on, hardware_vendor, hardware_model) =
+        parse_version(version_txt.as_deref());
+    let (uptime, load) = parse_uptime(uptime_txt.as_deref());
+    let memory = parse_memory(memory_txt.as_deref());
+    let storage = parse_storage(storage_txt.as_deref());
+
+    let mut raw = BTreeMap::new();
+    if q.debug.is_some() {
+        let mut put = |k: &str, v: &Option<String>| {
+            raw.insert(k.to_string(), v.clone().unwrap_or_else(|| "<none>".into()));
+        };
+        put("version", &version_txt);
+        put("uptime", &uptime_txt);
+        put("memory", &memory_txt);
+        put("storage", &storage_txt);
+    }
+
+    Ok(Json(DeviceSystemInfo {
+        version,
+        release_train,
+        built_on,
+        hardware_vendor,
+        hardware_model,
+        uptime,
+        load,
+        memory,
+        storage,
+        raw,
+    }))
+}
+
+/// Parse the `Key: value` lines of `show version`.
+fn parse_version(
+    text: Option<&str>,
+) -> (Option<String>, Option<String>, Option<String>, Option<String>, Option<String>) {
+    let Some(text) = text else {
+        return (None, None, None, None, None);
+    };
+    let mut map: BTreeMap<String, String> = BTreeMap::new();
+    for line in text.lines() {
+        if let Some((k, v)) = line.split_once(':') {
+            let k = k.trim().to_ascii_lowercase();
+            let v = v.trim();
+            if !k.is_empty() && !v.is_empty() {
+                map.insert(k, v.to_string());
+            }
+        }
+    }
+    let get = |k: &str| map.get(k).cloned();
+    let version = get("version").map(|v| {
+        v.strip_prefix("VyOS ")
+            .or_else(|| v.strip_prefix("vyos "))
+            .unwrap_or(&v)
+            .trim()
+            .to_string()
+    });
+    (
+        version,
+        get("release train"),
+        get("built on"),
+        get("hardware vendor"),
+        get("hardware model"),
+    )
+}
+
+/// Parse `show system uptime`: an "Uptime:" line plus 1/5/15-minute load percentages.
+fn parse_uptime(text: Option<&str>) -> (Option<String>, LoadAverage) {
+    let mut uptime = None;
+    let mut load = LoadAverage::default();
+    let Some(text) = text else {
+        return (uptime, load);
+    };
+    for line in text.lines() {
+        let lower = line.trim().to_ascii_lowercase();
+        if lower.starts_with("uptime") {
+            uptime = line.split_once(':').map(|(_, v)| v.trim().to_string()).filter(|s| !s.is_empty());
+        } else if lower.starts_with("1 minute") {
+            load.one = parse_pct(line);
+        } else if lower.starts_with("5 minute") {
+            load.five = parse_pct(line);
+        } else if lower.starts_with("15 minute") {
+            load.fifteen = parse_pct(line);
+        }
+    }
+    (uptime, load)
+}
+
+/// Extract the numeric percentage after the colon, tolerating a trailing `%`.
+fn parse_pct(line: &str) -> Option<f64> {
+    let after = line.split_once(':')?.1.trim().trim_end_matches('%').trim();
+    after.parse::<f64>().ok()
+}
+
+/// Parse a human size token like "15.6 GB", "184.9 MB", "126G", or a bare number into bytes.
+fn parse_size(s: &str) -> Option<u64> {
+    let s = s.trim();
+    let num_end = s
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(s.len());
+    if num_end == 0 {
+        return None;
+    }
+    let num: f64 = s[..num_end].parse().ok()?;
+    let unit = s[num_end..].trim();
+    let mult = match unit.chars().next().map(|c| c.to_ascii_uppercase()) {
+        Some('K') => 1024f64,
+        Some('M') => 1024f64.powi(2),
+        Some('G') => 1024f64.powi(3),
+        Some('T') => 1024f64.powi(4),
+        _ => 1.0,
+    };
+    Some((num * mult) as u64)
+}
+
+/// Parse `show system memory`: Total/Used/Free lines with optional units.
+fn parse_memory(text: Option<&str>) -> MemoryInfo {
+    let mut mem = MemoryInfo::default();
+    let Some(text) = text else { return mem };
+    for line in text.lines() {
+        let Some((k, v)) = line.split_once(':') else { continue };
+        let key = k.trim().to_ascii_lowercase();
+        let val = v.trim();
+        match key.as_str() {
+            "total" => mem.total_bytes = parse_size(val),
+            "used" => mem.used_bytes = parse_size(val),
+            "free" => mem.free_bytes = parse_size(val),
+            _ => {}
+        }
+    }
+    if let (Some(total), Some(used)) = (mem.total_bytes, mem.used_bytes) {
+        if total > 0 {
+            mem.used_pct = Some((used as f64 / total as f64) * 100.0);
+        }
+    }
+    mem
+}
+
+/// Extract a percentage from a parenthesised suffix like "562M (1%)" → 1.0.
+fn parse_paren_pct(s: &str) -> Option<f64> {
+    let start = s.find('(')?;
+    let inner = &s[start + 1..];
+    let end = inner.find('%')?;
+    inner[..end].trim().parse::<f64>().ok()
+}
+
+/// Parse `show system storage`, which VyOS emits as `Key: value` blocks (one per filesystem):
+///
+/// ```text
+/// Filesystem: /dev/sda3
+/// Size: 126G
+/// Used: 562M (1%)
+/// Available: 119G (99%)
+/// ```
+fn parse_storage(text: Option<&str>) -> Vec<StorageMount> {
+    let mut out = Vec::new();
+    let Some(text) = text else { return out };
+    let mut cur: Option<StorageMount> = None;
+    for line in text.lines() {
+        let Some((k, v)) = line.split_once(':') else { continue };
+        let key = k.trim().to_ascii_lowercase();
+        let val = v.trim();
+        match key.as_str() {
+            "filesystem" => {
+                if let Some(m) = cur.take() {
+                    out.push(m);
+                }
+                cur = Some(StorageMount {
+                    filesystem: val.to_string(),
+                    size_bytes: None,
+                    used_bytes: None,
+                    avail_bytes: None,
+                    used_pct: None,
+                    mount: None,
+                });
+            }
+            "size" => {
+                if let Some(m) = cur.as_mut() {
+                    m.size_bytes = parse_size(val);
+                }
+            }
+            "used" => {
+                if let Some(m) = cur.as_mut() {
+                    m.used_bytes = parse_size(val);
+                    m.used_pct = parse_paren_pct(val);
+                }
+            }
+            "available" | "avail" => {
+                if let Some(m) = cur.as_mut() {
+                    m.avail_bytes = parse_size(val);
+                }
+            }
+            "mounted on" | "mount" => {
+                if let Some(m) = cur.as_mut() {
+                    m.mount = Some(val.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(m) = cur.take() {
+        out.push(m);
+    }
+    out
 }
 
 // ── Staging (system) ──────────────────────────────────────────────────────────

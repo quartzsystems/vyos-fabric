@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, ArrowUp, ArrowDown, RotateCw, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Search, ArrowUp, ArrowDown, RotateCw, X, Columns3, Check, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 export interface Column<T> {
@@ -14,6 +14,8 @@ export interface Column<T> {
   sortable?: boolean;
   mono?: boolean;
   width?: number;
+  /** Smallest width (px) the column may be resized to. Defaults to 60. */
+  minWidth?: number;
 }
 
 export interface FilterDef<T> {
@@ -24,6 +26,13 @@ export interface FilterDef<T> {
 }
 
 const ALL = "__all__";
+const MIN_COL = 60;
+
+interface Layout {
+  order: string[];
+  widths: Record<string, number>;
+  hidden: string[];
+}
 
 export function DataTable<T>({
   rows,
@@ -35,6 +44,7 @@ export function DataTable<T>({
   toolbar,
   actions,
   onRefresh,
+  storageKey,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -48,6 +58,8 @@ export function DataTable<T>({
   actions?: (row: T) => React.ReactNode;
   /** When provided, renders a Refresh button that re-runs this in place (spinner managed here). */
   onRefresh?: () => void | Promise<void>;
+  /** Namespace for persisting column layout (order/width/visibility). Falls back to the column set. */
+  storageKey?: string;
 }) {
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -65,6 +77,175 @@ export function DataTable<T>({
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // ── column layout (order / width / visibility), persisted per table ───────────
+  const persistKey = `qz-table:${storageKey ?? columns.map((c) => c.key).join(",")}`;
+  const defaultOrder = useMemo(() => columns.map((c) => c.key), [columns]);
+
+  const stored = useMemo<Partial<Layout>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = window.localStorage.getItem(persistKey);
+      return raw ? (JSON.parse(raw) as Partial<Layout>) : {};
+    } catch {
+      return {};
+    }
+  }, [persistKey]);
+
+  const [order, setOrder] = useState<string[]>(stored.order ?? defaultOrder);
+  const [widths, setWidths] = useState<Record<string, number>>(stored.widths ?? {});
+  const [hidden, setHidden] = useState<Set<string>>(new Set(stored.hidden ?? []));
+  const [seeded, setSeeded] = useState(Object.keys(stored.widths ?? {}).length > 0);
+
+  // Reconcile order with the actual column set (columns added/removed across versions).
+  const orderedKeys = useMemo(() => {
+    const known = new Set(defaultOrder);
+    const kept = order.filter((k) => known.has(k));
+    for (const k of defaultOrder) if (!kept.includes(k)) kept.push(k);
+    return kept;
+  }, [order, defaultOrder]);
+
+  const byKey = useMemo(() => new Map(columns.map((c) => [c.key, c])), [columns]);
+  const visibleCols = useMemo(
+    () => orderedKeys.map((k) => byKey.get(k)!).filter((c) => c && !hidden.has(c.key)),
+    [orderedKeys, byKey, hidden],
+  );
+
+  const colWidth = (c: Column<T>) => widths[c.key] ?? c.width ?? (seeded ? 120 : undefined);
+
+  // Persist layout whenever it changes.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const payload: Layout = { order: orderedKeys, widths, hidden: [...hidden] };
+      window.localStorage.setItem(persistKey, JSON.stringify(payload));
+    } catch {
+      /* ignore quota / serialization errors */
+    }
+  }, [persistKey, orderedKeys, widths, hidden]);
+
+  // Seed widths from the natural (auto-layout) render, then switch to fixed layout.
+  const tableRef = useRef<HTMLTableElement>(null);
+  useLayoutEffect(() => {
+    if (seeded) return;
+    const table = tableRef.current;
+    if (!table) return;
+    const measured: Record<string, number> = {};
+    table.querySelectorAll<HTMLElement>("thead th[data-col-key]").forEach((th) => {
+      const k = th.dataset.colKey!;
+      measured[k] = Math.round(th.getBoundingClientRect().width);
+    });
+    setWidths((prev) => ({ ...measured, ...prev }));
+    setSeeded(true);
+  }, [seeded]);
+
+  const resetLayout = () => {
+    setOrder(defaultOrder);
+    setHidden(new Set());
+    setWidths({});
+    setSeeded(false);
+  };
+
+  // ── column resize (transfers width to the right-hand neighbour) ───────────────
+  const [resizing, setResizing] = useState(false);
+  const resizeRef = useRef<{
+    leftKey: string;
+    rightKey: string;
+    startX: number;
+    startLeft: number;
+    startRight: number;
+    leftMin: number;
+    rightMin: number;
+  } | null>(null);
+
+  const onResizeDown = (e: React.MouseEvent, index: number) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const left = visibleCols[index];
+    const right = visibleCols[index + 1];
+    if (!right) return;
+    const th = (e.currentTarget.parentElement as HTMLElement).closest("th") as HTMLElement | null;
+    const rightTh = th?.nextElementSibling as HTMLElement | null;
+    resizeRef.current = {
+      leftKey: left.key,
+      rightKey: right.key,
+      startX: e.clientX,
+      startLeft: widths[left.key] ?? th?.getBoundingClientRect().width ?? 120,
+      startRight: widths[right.key] ?? rightTh?.getBoundingClientRect().width ?? 120,
+      leftMin: left.minWidth ?? MIN_COL,
+      rightMin: right.minWidth ?? MIN_COL,
+    };
+    setResizing(true);
+  };
+
+  useEffect(() => {
+    if (!resizing) return;
+    document.body.style.cursor = "col-resize";
+    return () => {
+      document.body.style.cursor = "";
+    };
+  }, [resizing]);
+
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      const r = resizeRef.current;
+      if (!r) return;
+      let delta = e.clientX - r.startX;
+      delta = Math.max(delta, -(r.startLeft - r.leftMin));
+      delta = Math.min(delta, r.startRight - r.rightMin);
+      setWidths((w) => ({ ...w, [r.leftKey]: r.startLeft + delta, [r.rightKey]: r.startRight - delta }));
+    };
+    const up = () => {
+      if (!resizeRef.current) return;
+      resizeRef.current = null;
+      setResizing(false);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, []);
+
+  // ── column reorder (drag header onto another header) ──────────────────────────
+  const dragColRef = useRef<string | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+
+  const reorderColumn = (from: string, to: string) => {
+    if (!from || from === to) return;
+    setOrder(() => {
+      const arr = [...orderedKeys];
+      const fi = arr.indexOf(from);
+      if (fi < 0) return arr;
+      arr.splice(fi, 1);
+      const ti = arr.indexOf(to);
+      if (ti < 0) return arr;
+      arr.splice(ti, 0, from);
+      return arr;
+    });
+  };
+
+  // ── columns menu (visibility) ─────────────────────────────────────────────────
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  const toggleColumn = (key: string) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else if (visibleCols.length > 1) next.add(key); // keep at least one column
+      return next;
+    });
 
   // filter → search → sort
   const displayed = useMemo(() => {
@@ -185,7 +366,7 @@ export function DataTable<T>({
   };
 
   const selectedCount = selected.size;
-  const colSpan = columns.length + 1 + (actions ? 1 : 0);
+  const colSpan = visibleCols.length + 1 + (actions ? 1 : 0);
 
   return (
     <div className="flex flex-col gap-3">
@@ -227,6 +408,64 @@ export function DataTable<T>({
         ))}
 
         <div className="ml-auto flex items-center gap-3">
+          {/* Columns menu */}
+          <div className="relative" ref={menuRef}>
+            <Button kind="secondary" size="sm" icon={Columns3} onClick={() => setMenuOpen((o) => !o)}>
+              Columns
+            </Button>
+            {menuOpen && (
+              <div
+                className="absolute right-0 mt-1 z-20 rounded-md py-1 min-w-[200px]"
+                style={{
+                  background: "var(--qz-surface)",
+                  border: "1px solid var(--qz-border)",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+                }}
+              >
+                <div className="px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--qz-fg-4)]">
+                  Show columns
+                </div>
+                {orderedKeys.map((k) => {
+                  const c = byKey.get(k);
+                  if (!c) return null;
+                  const visible = !hidden.has(k);
+                  const lastVisible = visible && visibleCols.length === 1;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => toggleColumn(k)}
+                      disabled={lastVisible}
+                      className="flex items-center gap-2 w-full px-3 py-[6px] text-[13px] text-left bg-transparent border-0 text-[var(--qz-fg-2)] hover:bg-[color-mix(in_oklab,white_5%,transparent)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span
+                        className="grid place-items-center w-[15px] h-[15px] rounded-[4px] flex-shrink-0"
+                        style={{
+                          border: "1px solid var(--qz-border-strong)",
+                          background: visible ? "var(--qz-accent)" : "var(--qz-input-bg)",
+                        }}
+                      >
+                        {visible && <Check size={11} style={{ color: "var(--qz-fg-on-accent)" }} />}
+                      </span>
+                      {c.header}
+                    </button>
+                  );
+                })}
+                <div className="my-1 mx-3 border-t" style={{ borderColor: "var(--qz-divider)" }} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetLayout();
+                    setMenuOpen(false);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-[6px] text-[13px] text-left bg-transparent border-0 text-[var(--qz-fg-3)] hover:bg-[color-mix(in_oklab,white_5%,transparent)] hover:text-[var(--qz-fg-1)] transition-colors cursor-pointer"
+                >
+                  <RotateCcw size={13} /> Reset layout
+                </button>
+              </div>
+            )}
+          </div>
+
           {onRefresh && (
             <Button kind="secondary" size="sm" icon={RotateCw} onClick={handleRefresh} disabled={refreshing}>
               {refreshing ? "Refreshing…" : "Refresh"}
@@ -266,7 +505,18 @@ export function DataTable<T>({
           userSelect: isDragging ? "none" : "auto",
         }}
       >
-        <table className="qz-table">
+        <table
+          ref={tableRef}
+          className="qz-table"
+          style={{ tableLayout: seeded ? "fixed" : "auto", width: "100%" }}
+        >
+          <colgroup>
+            <col style={{ width: 40 }} />
+            {visibleCols.map((c) => (
+              <col key={c.key} style={{ width: colWidth(c) }} />
+            ))}
+            {actions && <col style={{ width: 90 }} />}
+          </colgroup>
           <thead>
             <tr>
               <th style={{ width: 40 }}>
@@ -281,10 +531,40 @@ export function DataTable<T>({
                   aria-label="Select all"
                 />
               </th>
-              {columns.map((c) => (
+              {visibleCols.map((c, index) => (
                 <th
                   key={c.key}
-                  style={{ width: c.width, cursor: c.sortable ? "pointer" : "default" }}
+                  data-col-key={c.key}
+                  draggable
+                  onDragStart={(e) => {
+                    if (resizeRef.current) {
+                      e.preventDefault();
+                      return;
+                    }
+                    dragColRef.current = c.key;
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragOver={(e) => {
+                    if (!dragColRef.current || dragColRef.current === c.key) return;
+                    e.preventDefault();
+                    if (dragOverKey !== c.key) setDragOverKey(c.key);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (dragColRef.current) reorderColumn(dragColRef.current, c.key);
+                    dragColRef.current = null;
+                    setDragOverKey(null);
+                  }}
+                  onDragEnd={() => {
+                    dragColRef.current = null;
+                    setDragOverKey(null);
+                  }}
+                  style={{
+                    cursor: c.sortable ? "pointer" : "grab",
+                    position: "relative",
+                    boxShadow:
+                      dragOverKey === c.key ? "inset 2px 0 0 0 var(--qz-accent)" : undefined,
+                  }}
                   onClick={() => {
                     if (!c.sortable) return;
                     if (sortKey === c.key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -299,6 +579,24 @@ export function DataTable<T>({
                     {sortKey === c.key &&
                       (sortDir === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
                   </span>
+                  {index < visibleCols.length - 1 && (
+                    <span
+                      onMouseDown={(e) => onResizeDown(e, index)}
+                      onClick={(e) => e.stopPropagation()}
+                      onDragStart={(e) => e.preventDefault()}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        right: -3,
+                        width: 7,
+                        height: "100%",
+                        cursor: "col-resize",
+                        zIndex: 2,
+                        userSelect: "none",
+                      }}
+                      aria-hidden
+                    />
+                  )}
                 </th>
               ))}
               {actions && <th style={{ width: 90 }} className="text-right">Actions</th>}
@@ -331,8 +629,12 @@ export function DataTable<T>({
                         aria-label="Select row"
                       />
                     </td>
-                    {columns.map((c) => (
-                      <td key={c.key} className={c.mono ? "mono" : undefined}>
+                    {visibleCols.map((c) => (
+                      <td
+                        key={c.key}
+                        className={c.mono ? "mono" : undefined}
+                        style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      >
                         {c.render ? c.render(row) : (c.value(row) ?? "—")}
                       </td>
                     ))}
