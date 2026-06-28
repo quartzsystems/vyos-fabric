@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { DetailDrawer } from "@/components/dashboard/DetailDrawer";
 import { CommandPalette } from "@/components/dashboard/CommandPalette";
+import { ChangeTray } from "@/components/dashboard/ChangeTray";
 import { Toast } from "@/components/dashboard/Toast";
 import { DashboardProvider, useDashboard } from "@/lib/DashboardContext";
+import { ConfigChangesProvider } from "@/lib/ConfigChanges";
+import { DeviceProvider } from "@/lib/DeviceContext";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const nextRouter = useRouter();
@@ -40,15 +43,28 @@ function Shell({ children }: { children: React.ReactNode }) {
         onClose={() => setPaletteOpen(false)}
         onNavigate={(href) => nextRouter.push(href)}
       />
+      <ChangeTray />
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }
 
-export function DashboardShell({ children }: { children: React.ReactNode }) {
+export function DashboardShell({
+  deviceId,
+  siteSlug,
+  children,
+}: {
+  deviceId: string;
+  siteSlug: string;
+  children: React.ReactNode;
+}) {
   return (
-    <DashboardProvider>
-      <Shell>{children}</Shell>
-    </DashboardProvider>
+    <DeviceProvider deviceId={deviceId} siteSlug={siteSlug}>
+      <DashboardProvider>
+        <ConfigChangesProvider>
+          <Shell>{children}</Shell>
+        </ConfigChangesProvider>
+      </DashboardProvider>
+    </DeviceProvider>
   );
 }

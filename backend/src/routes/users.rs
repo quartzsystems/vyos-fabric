@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
+    auth::hash_password,
     error::{AppError, Result},
     models::{CreateUser, GrantAccess, SiteAccessEntry, SiteAccessRow, UpdateUser, User, UserWithAccess},
     state::AppState,
@@ -95,8 +96,7 @@ async fn create_user(
     let role = body.role.unwrap_or_else(|| "operator".into());
     let first_name = body.first_name.unwrap_or_default();
     let last_name = body.last_name.unwrap_or_default();
-    // TODO: replace with argon2 hash before shipping
-    let password_hash = body.password;
+    let password_hash = hash_password(&body.password).map_err(AppError::Internal)?;
 
     let user = sqlx::query_as::<_, User>(
         "INSERT INTO users (first_name, last_name, email, username, password_hash, role)
@@ -120,6 +120,12 @@ async fn update_user(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateUser>,
 ) -> Result<Json<UserWithAccess>> {
+    // Hash a new password if one was supplied; otherwise leave it unchanged.
+    let password_hash = match body.password.as_deref() {
+        Some(p) if !p.is_empty() => Some(hash_password(p).map_err(AppError::Internal)?),
+        _ => None,
+    };
+
     let user = sqlx::query_as::<_, User>(
         "UPDATE users SET
              first_name    = COALESCE($1, first_name),
@@ -135,7 +141,7 @@ async fn update_user(
     .bind(body.last_name)
     .bind(body.email)
     .bind(body.username)
-    .bind(body.password)
+    .bind(password_hash)
     .bind(body.role)
     .bind(id)
     .fetch_optional(&state.db)

@@ -1,3 +1,4 @@
+mod auth;
 mod error;
 mod models;
 mod routes;
@@ -31,6 +32,11 @@ async fn main() -> anyhow::Result<()> {
 
     let database_url = format!("postgres://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}");
 
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
+        tracing::warn!("JWT_SECRET not set; using an insecure dev default — set it in production");
+        "dev-insecure-change-me".into()
+    });
+
     let pool = PgPoolOptions::new()
         .max_connections(20)
         .connect(&database_url)
@@ -38,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
 
     sqlx::migrate!("./migrations").run(&pool).await?;
 
-    let state = state::AppState::new(pool.clone());
+    let state = state::AppState::new(pool.clone(), jwt_secret);
 
     // Background device polling every 30 seconds
     let poll_pool = pool;
@@ -50,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
         .allow_headers(Any);
 
     let app = Router::new()
-        .nest("/api", routes::router())
+        .nest("/api", routes::router(state.clone()))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

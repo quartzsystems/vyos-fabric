@@ -1,28 +1,31 @@
 "use client";
 
-import { Gauge, Settings, Search, LogOut, Network, Route, ArrowLeftRight, Shield, Server, LucideIcon, Building2, ArrowLeft } from "lucide-react";
+import { Gauge, Settings, Search, LogOut, Network, Route, ArrowLeftRight, Shield, Server, LucideIcon, Building2, ArrowLeft, ChevronDown, ChevronRight, Cable, Tags } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useDevice } from "@/lib/DeviceContext";
+import { clearSession } from "@/lib/api";
+
+interface NavChild {
+  id: string;
+  label: string;
+  href: string;
+  icon: LucideIcon;
+}
 
 interface NavItem {
   id: string;
   label: string;
   icon: LucideIcon;
   href: string;
+  children?: NavChild[];
 }
 
 interface AuthUser {
   first_name: string;
   last_name: string;
   username: string;
-}
-
-interface ManagedDevice {
-  deviceId: string;
-  hostname: string;
-  siteId: string;
-  siteName: string;
 }
 
 function initials(user: AuthUser): string {
@@ -40,40 +43,48 @@ function displayName(user: AuthUser): string {
 export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { basePath, device } = useDevice();
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [managedDevice, setManagedDevice] = useState<ManagedDevice | null>(null);
 
   useEffect(() => {
     try {
       const rawUser = localStorage.getItem("vyos-user");
       if (rawUser) setUser(JSON.parse(rawUser));
-      const rawDevice = localStorage.getItem("vyos-managed-device");
-      if (rawDevice) setManagedDevice(JSON.parse(rawDevice));
     } catch {}
   }, []);
 
   const items: NavItem[] = [
-    { id: "overview",    label: "Dashboard",  icon: Gauge,           href: "/" },
-    { id: "interfaces",  label: "Interfaces", icon: Network,         href: "/interfaces" },
-    { id: "routing",     label: "Routing",    icon: Route,           href: "/routing" },
-    { id: "nat",         label: "NAT",        icon: ArrowLeftRight,  href: "/nat" },
-    { id: "firewall",    label: "Firewall",   icon: Shield,          href: "/firewall" },
-    { id: "services",    label: "Services",   icon: Server,          href: "/services" },
-    { id: "system",      label: "System",     icon: Settings,        href: "/system" },
+    { id: "overview",    label: "Dashboard",  icon: Gauge,           href: basePath },
+    {
+      id: "interfaces",
+      label: "Interfaces",
+      icon: Network,
+      href: `${basePath}/interfaces`,
+      children: [
+        { id: "ethernet", label: "Ethernet", href: `${basePath}/interfaces/ethernet`, icon: Cable },
+        { id: "vlan",     label: "VLAN",     href: `${basePath}/interfaces/vlan`,     icon: Tags },
+      ],
+    },
+    { id: "routing",     label: "Routing",    icon: Route,           href: `${basePath}/routing` },
+    { id: "nat",         label: "NAT",        icon: ArrowLeftRight,  href: `${basePath}/nat` },
+    { id: "firewall",    label: "Firewall",   icon: Shield,          href: `${basePath}/firewall` },
+    { id: "services",    label: "Services",   icon: Server,          href: `${basePath}/services` },
+    { id: "system",      label: "System",     icon: Settings,        href: `${basePath}/system` },
   ];
 
   const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+    href === basePath ? pathname === basePath : pathname.startsWith(href);
+
+  // Expandable submenus: open if explicitly toggled, else default-open on the active subtree.
+  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
+  const isOpen = (item: NavItem) => openMenus[item.id] ?? pathname.startsWith(item.href);
 
   const logout = () => {
-    localStorage.removeItem("vyos-auth");
-    localStorage.removeItem("vyos-user");
+    clearSession();
     router.push("/login");
   };
 
   const exitDevice = () => {
-    localStorage.removeItem("vyos-managed-device");
-    setManagedDevice(null);
     router.push("/controller/sites");
   };
 
@@ -119,19 +130,58 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
       {/* Nav */}
       <div className="flex-1 overflow-auto px-3 flex flex-col gap-[2px] pt-1">
         {items.map((item) => {
-          const active = isActive(item.href);
           const Icon = item.icon;
+          const itemClass = (active: boolean) =>
+            [
+              "flex items-center gap-[10px] px-[10px] py-[8px] rounded-md text-[13.5px] font-medium border transition-all duration-[120ms] no-underline w-full text-left cursor-pointer",
+              active
+                ? "bg-[var(--qz-accent-soft)] text-[var(--qz-accent)] border-[color-mix(in_oklab,var(--qz-accent)_30%,transparent)]"
+                : "text-[var(--qz-fg-3)] border-transparent hover:text-[var(--qz-fg-1)] hover:bg-[color-mix(in_oklab,white_4%,transparent)]",
+            ].join(" ");
+
+          if (item.children) {
+            const open = isOpen(item);
+            // Parent never shows the green "active" state — only its children light up.
+            return (
+              <div key={item.id}>
+                <button
+                  type="button"
+                  onClick={() => setOpenMenus((p) => ({ ...p, [item.id]: !open }))}
+                  className={itemClass(false)}
+                >
+                  <Icon size={16} />
+                  <span className="flex-1">{item.label}</span>
+                  {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                </button>
+                {open && (
+                  <div className="flex flex-col gap-[2px] mt-[2px] ml-[26px]">
+                    {item.children.map((child) => {
+                      const active = pathname.startsWith(child.href);
+                      const ChildIcon = child.icon;
+                      return (
+                        <Link
+                          key={child.id}
+                          href={child.href}
+                          className={[
+                            "flex items-center gap-[9px] px-[10px] py-[7px] rounded-md text-[13px] font-medium border transition-all duration-[120ms] no-underline",
+                            active
+                              ? "bg-[var(--qz-accent-soft)] text-[var(--qz-accent)] border-[color-mix(in_oklab,var(--qz-accent)_30%,transparent)]"
+                              : "text-[var(--qz-fg-3)] border-transparent hover:text-[var(--qz-fg-1)] hover:bg-[color-mix(in_oklab,white_4%,transparent)]",
+                          ].join(" ")}
+                        >
+                          <ChildIcon size={15} />
+                          <span>{child.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           return (
-            <Link
-              key={item.id}
-              href={item.href}
-              className={[
-                "flex items-center gap-[10px] px-[10px] py-[8px] rounded-md text-[13.5px] font-medium border transition-all duration-[120ms] no-underline",
-                active
-                  ? "bg-[var(--qz-accent-soft)] text-[var(--qz-accent)] border-[color-mix(in_oklab,var(--qz-accent)_30%,transparent)]"
-                  : "text-[var(--qz-fg-3)] border-transparent hover:text-[var(--qz-fg-1)] hover:bg-[color-mix(in_oklab,white_4%,transparent)]",
-              ].join(" ")}
-            >
+            <Link key={item.id} href={item.href} className={itemClass(isActive(item.href))}>
               <Icon size={16} />
               <span>{item.label}</span>
             </Link>
@@ -140,7 +190,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
       </div>
 
       {/* Managed device context */}
-      {managedDevice && (
+      {device && (
         <div
           className="flex-shrink-0 px-3 pb-3"
           style={{ borderTop: "1px solid var(--qz-border)" }}
@@ -158,13 +208,13 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
             <div className="flex items-center gap-[7px] mb-[4px]">
               <Server size={12} className="text-[var(--qz-accent)] flex-shrink-0" />
               <span className="text-[13px] font-semibold text-[var(--qz-fg-1)] truncate">
-                {managedDevice.hostname}
+                {device.hostname}
               </span>
             </div>
             <div className="flex items-center gap-[7px] mb-3">
               <Building2 size={12} className="text-[var(--qz-fg-4)] flex-shrink-0" />
               <span className="text-[12px] text-[var(--qz-fg-3)] truncate">
-                {managedDevice.siteName}
+                {device.siteName}
               </span>
             </div>
             <button

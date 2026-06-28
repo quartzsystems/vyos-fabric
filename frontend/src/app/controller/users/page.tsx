@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Trash2, X, Building2, Pencil } from "lucide-react";
-
-const API = "http://localhost:3001/api";
+import { API, fetchWithAuth } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -171,7 +170,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     setSaving(true);
     setError("");
     try {
-      const res = await fetch(`${API}/users`, {
+      const res = await fetchWithAuth(`${API}/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -351,7 +350,7 @@ function EditUserModal({
     setSaving(true);
     setInfoError("");
     try {
-      const res = await fetch(`${API}/users/${user.id}`, {
+      const res = await fetchWithAuth(`${API}/users/${user.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -377,7 +376,7 @@ function EditUserModal({
   };
 
   const grantAccess = async (siteId: string, r: string) => {
-    await fetch(`${API}/users/${user.id}/access`, {
+    await fetchWithAuth(`${API}/users/${user.id}/access`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ site_id: siteId, role: r }),
@@ -401,7 +400,7 @@ function EditUserModal({
 
   const removeAccess = async (siteId: string) => {
     setAccess((prev) => prev.filter((a) => a.site_id !== siteId));
-    await fetch(`${API}/users/${user.id}/access/${siteId}`, { method: "DELETE" });
+    await fetchWithAuth(`${API}/users/${user.id}/access/${siteId}`, { method: "DELETE" });
   };
 
   const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
@@ -622,8 +621,8 @@ export default function UsersPage() {
   const load = useCallback(async () => {
     try {
       const [ur, sr] = await Promise.all([
-        fetch(`${API}/users`),
-        fetch(`${API}/sites`),
+        fetchWithAuth(`${API}/users`),
+        fetchWithAuth(`${API}/sites`),
       ]);
       setUsers(await ur.json());
       setSites(await sr.json());
@@ -639,7 +638,7 @@ export default function UsersPage() {
   }, [load]);
 
   const deleteUser = async (id: string) => {
-    await fetch(`${API}/users/${id}`, { method: "DELETE" });
+    await fetchWithAuth(`${API}/users/${id}`, { method: "DELETE" });
     setConfirmDelete(null);
     setUsers((prev) => prev.filter((u) => u.id !== id));
   };

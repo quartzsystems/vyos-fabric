@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
-
-const API = "http://localhost:3001/api";
+import { API, setSession } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,9 +31,8 @@ export default function LoginPage() {
         setError("Invalid username or password.");
         return;
       }
-      const user = await res.json();
-      localStorage.setItem("vyos-auth", "1");
-      localStorage.setItem("vyos-user", JSON.stringify(user));
+      const { token, ...user } = await res.json();
+      setSession(token, user);
       router.push("/controller");
     } catch {
       setError("Could not reach the server. Is the backend running?");

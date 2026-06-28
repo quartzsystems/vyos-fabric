@@ -7,6 +7,7 @@ use axum::{
 use uuid::Uuid;
 
 use crate::{
+    auth::{accessible_site_ids, AuthUser},
     error::{AppError, Result},
     models::{CreateSite, Router as RouterModel, Site, UpdateSite},
     state::AppState,
@@ -19,30 +20,66 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/routers", get(list_site_routers))
 }
 
-async fn list_sites(State(state): State<AppState>) -> Result<Json<Vec<Site>>> {
-    let sites = sqlx::query_as::<_, Site>(
-        "SELECT id, name, description, created_at FROM sites ORDER BY name",
-    )
-    .fetch_all(&state.db)
-    .await?;
+/// Non-admins may only touch sites they've been granted access to.
+async fn ensure_site_access(state: &AppState, claims: &crate::auth::Claims, site_id: Uuid) -> Result<()> {
+    if claims.is_admin() {
+        return Ok(());
+    }
+    if accessible_site_ids(&state.db, claims.sub).await?.contains(&site_id) {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
+fn require_admin(claims: &crate::auth::Claims) -> Result<()> {
+    if claims.is_admin() {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
+async fn list_sites(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> Result<Json<Vec<Site>>> {
+    let sites = if claims.is_admin() {
+        sqlx::query_as::<_, Site>("SELECT id, name, description, created_at FROM sites ORDER BY name")
+            .fetch_all(&state.db)
+            .await?
+    } else {
+        let ids = accessible_site_ids(&state.db, claims.sub).await?;
+        sqlx::query_as::<_, Site>(
+            "SELECT id, name, description, created_at FROM sites WHERE id = ANY($1) ORDER BY name",
+        )
+        .bind(&ids)
+        .fetch_all(&state.db)
+        .await?
+    };
     Ok(Json(sites))
 }
 
-async fn get_site(State(state): State<AppState>, Path(id): Path<Uuid>) -> Result<Json<Site>> {
-    sqlx::query_as::<_, Site>(
-        "SELECT id, name, description, created_at FROM sites WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await?
-    .map(Json)
-    .ok_or(AppError::NotFound)
+async fn get_site(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Site>> {
+    ensure_site_access(&state, &claims, id).await?;
+    sqlx::query_as::<_, Site>("SELECT id, name, description, created_at FROM sites WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .map(Json)
+        .ok_or(AppError::NotFound)
 }
 
 async fn create_site(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Json(body): Json<CreateSite>,
 ) -> Result<(StatusCode, Json<Site>)> {
+    require_admin(&claims)?;
     let site = sqlx::query_as::<_, Site>(
         "INSERT INTO sites (name, description) VALUES ($1, $2)
          RETURNING id, name, description, created_at",
@@ -56,9 +93,11 @@ async fn create_site(
 
 async fn update_site(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateSite>,
 ) -> Result<Json<Site>> {
+    require_admin(&claims)?;
     let site = sqlx::query_as::<_, Site>(
         "UPDATE sites SET
              name        = COALESCE($1, name),
@@ -77,8 +116,10 @@ async fn update_site(
 
 async fn delete_site(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>> {
+    require_admin(&claims)?;
     let result = sqlx::query("DELETE FROM sites WHERE id = $1")
         .bind(id)
         .execute(&state.db)
@@ -91,8 +132,10 @@ async fn delete_site(
 
 async fn list_site_routers(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<RouterModel>>> {
+    ensure_site_access(&state, &claims, id).await?;
     let routers = sqlx::query_as::<_, RouterModel>(
         "SELECT id, site_id, hostname, description, role, mgmt_ip, status, version, uptime_secs, \
          api_port, api_protocol, api_key, api_timeout, \

@@ -8,6 +8,8 @@ pub enum AppError {
     NotFound,
     #[error("invalid credentials")]
     Unauthorized,
+    #[error("forbidden")]
+    Forbidden,
     #[error("gateway error: {0}")]
     Gateway(String),
     #[error("database error: {0}")]
@@ -21,6 +23,7 @@ impl IntoResponse for AppError {
         let (status, message) = match &self {
             AppError::NotFound     => (StatusCode::NOT_FOUND,            self.to_string()),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED,          self.to_string()),
+            AppError::Forbidden    => (StatusCode::FORBIDDEN,             self.to_string()),
             AppError::Gateway(_)   => (StatusCode::BAD_GATEWAY,           self.to_string()),
             AppError::Database(_)  => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             AppError::Internal(_)  => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),

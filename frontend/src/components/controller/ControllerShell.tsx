@@ -4,6 +4,7 @@ import { Building2, Users, LogOut, LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { clearSession } from "@/lib/api";
 
 interface NavItem {
   id: string;
@@ -50,8 +51,7 @@ function ControllerSidebar() {
   const isActive = (href: string) => pathname.startsWith(href);
 
   const logout = () => {
-    localStorage.removeItem("vyos-auth");
-    localStorage.removeItem("vyos-user");
+    clearSession();
     router.push("/login");
   };
 

@@ -25,9 +25,12 @@ pub struct Router {
     pub uptime_secs: i64,
     pub api_port: Option<i32>,
     pub api_protocol: String,
+    // Secrets are never serialized to clients (write-only via update_router).
+    #[serde(skip_serializing)]
     pub api_key: Option<String>,
     pub api_timeout: i32,
     pub ssh_username: Option<String>,
+    #[serde(skip_serializing)]
     pub ssh_password: Option<String>,
     pub ssh_port: i32,
     pub created_at: DateTime<Utc>,

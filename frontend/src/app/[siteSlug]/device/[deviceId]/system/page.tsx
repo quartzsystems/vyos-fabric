@@ -1,8 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Save, Plus, Trash2, Clock } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Save, Plus, Trash2, Clock, AlertTriangle, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { fetchSystem } from "@/lib/api";
+import { useConfigChanges } from "@/lib/ConfigChanges";
+import { useDevice } from "@/lib/DeviceContext";
 
 const MONTHS = [
   "January","February","March","April","May","June",
@@ -44,6 +47,16 @@ const selectStyle = {
   background: "var(--qz-input-bg)",
   border: "1px solid var(--qz-border)",
 } as const;
+
+interface NtpRow {
+  key: string;
+  server: string;
+  refId: string | null;
+  pull: number | null;
+}
+
+let ntpKeyCounter = 0;
+const nextKey = () => `ntp-${ntpKeyCounter++}`;
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
@@ -87,48 +100,107 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-let ntpIdCounter = 4;
-
 function GeneralTab() {
-  const [hostname, setHostname] = useState("vyos-core-01");
-  const [domain, setDomain] = useState("fabric.quartz.internal");
+  const { stageSystemChanges } = useConfigChanges();
+  const { deviceId, device } = useDevice();
 
-  const now = new Date();
-  const [day, setDay] = useState(String(now.getDate()));
-  const [month, setMonth] = useState(MONTHS[now.getMonth()]);
-  const [year, setYear] = useState(String(now.getFullYear()));
-  const [syncWithInternet, setSyncWithInternet] = useState(true);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [saving, setSaving] = useState(false);
 
+  // Editable desired state.
+  const [hostname, setHostname] = useState("");
+  const [domain, setDomain] = useState("");
   const [timezone, setTimezone] = useState("UTC");
-  const [currentTime, setCurrentTime] = useState("");
   const [ntpEnabled, setNtpEnabled] = useState(true);
-  const [ntpServers, setNtpServers] = useState([
-    { id: 1, server: "0.pool.ntp.org", refId: ".POOL.", pull: 64 },
-    { id: 2, server: "1.pool.ntp.org", refId: ".POOL.", pull: 64 },
-    { id: 3, server: "2.pool.ntp.org", refId: ".POOL.", pull: 64 },
-  ]);
+  const [ntpServers, setNtpServers] = useState<NtpRow[]>([]);
+
+  // Live device clock (read-only).
+  const [deviceTime, setDeviceTime] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setStatus("loading");
+    try {
+      const cfg = await fetchSystem(deviceId);
+      setHostname(cfg.hostname ?? "");
+      setDomain(cfg.domain_name ?? "");
+      setTimezone(cfg.time_zone ?? "UTC");
+      setNtpEnabled(cfg.ntp_enabled);
+      setNtpServers(
+        cfg.ntp_servers.map((s) => ({
+          key: nextKey(),
+          server: s.server,
+          refId: s.ref_id,
+          pull: s.pull,
+        })),
+      );
+      setDeviceTime(cfg.current_time);
+      setStatus("ready");
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "Failed to load configuration.");
+      setStatus("error");
+    }
+  }, [deviceId]);
 
   useEffect(() => {
-    const update = () => setCurrentTime(new Date().toUTCString().replace("GMT", "UTC"));
-    update();
-    const id = setInterval(update, 1000);
-    return () => clearInterval(id);
-  }, []);
+    load();
+  }, [load]);
 
-  const addNtp = () => {
-    setNtpServers((prev) => [
-      ...prev,
-      { id: ntpIdCounter++, server: "", refId: "", pull: 64 },
-    ]);
+  const addNtp = () =>
+    setNtpServers((prev) => [...prev, { key: nextKey(), server: "", refId: null, pull: null }]);
+
+  const removeNtp = (key: string) =>
+    setNtpServers((prev) => prev.filter((s) => s.key !== key));
+
+  const updateNtp = (key: string, server: string) =>
+    setNtpServers((prev) => prev.map((s) => (s.key === key ? { ...s, server } : s)));
+
+  const save = async () => {
+    if (!deviceId) return;
+    setSaving(true);
+    try {
+      await stageSystemChanges({
+        hostname,
+        domain_name: domain,
+        time_zone: timezone,
+        ntp_enabled: ntpEnabled,
+        ntp_servers: ntpServers.map((s) => s.server.trim()).filter(Boolean),
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const removeNtp = (id: number) =>
-    setNtpServers((prev) => prev.filter((s) => s.id !== id));
+  // Parse device clock for the (read-only) Day/Month/Year display.
+  const parsedDate = deviceTime ? new Date(deviceTime) : null;
+  const validDate = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+
+  if (status === "loading") {
+    return (
+      <div className="max-w-[640px] text-[13px] text-[var(--qz-fg-4)]">
+        Loading system configuration{device ? ` from ${device.hostname}` : ""}…
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className="max-w-[640px] flex flex-col gap-3">
+        <div className="flex items-center gap-2 text-[13px] text-[var(--qz-danger)]">
+          <AlertTriangle size={15} />
+          {errorMsg}
+        </div>
+        <div>
+          <Button kind="secondary" icon={RotateCw} onClick={load}>Retry</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[640px] flex flex-col gap-8">
       {/* Hostname & Domain */}
-      <form onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5">
+      <form onSubmit={(e) => { e.preventDefault(); save(); }} className="flex flex-col gap-5">
         <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <div>
             <label className="block text-[12px] text-[var(--qz-fg-3)] mb-[6px]">Hostname</label>
@@ -155,8 +227,13 @@ function GeneralTab() {
             />
           </div>
         </div>
-        <div>
-          <Button kind="primary" icon={Save} type="submit">Save changes</Button>
+        <div className="flex items-center gap-3">
+          <Button kind="primary" icon={Save} type="submit" disabled={saving}>
+            {saving ? "Staging…" : "Save changes"}
+          </Button>
+          <span className="text-[12px] text-[var(--qz-fg-4)]">
+            Stages all System changes for review before commit.
+          </span>
         </div>
       </form>
 
@@ -169,50 +246,62 @@ function GeneralTab() {
           <div>
             <label className="block text-[12px] text-[var(--qz-fg-3)] mb-[6px]">Day</label>
             <select
-              value={day}
-              onChange={(e) => setDay(e.target.value)}
-              className="rounded-md px-3 py-[9px] text-[13px] text-[var(--qz-fg-1)] outline-none cursor-pointer"
+              value={validDate ? String(validDate.getDate()) : ""}
+              disabled
+              className="rounded-md px-3 py-[9px] text-[13px] text-[var(--qz-fg-2)] outline-none disabled:opacity-60"
               style={{ ...selectStyle, width: 72 }}
             >
-              {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
-                <option key={d}>{d}</option>
-              ))}
+              {validDate ? (
+                <option>{validDate.getDate()}</option>
+              ) : (
+                <option value="">—</option>
+              )}
             </select>
           </div>
           <div>
             <label className="block text-[12px] text-[var(--qz-fg-3)] mb-[6px]">Month</label>
             <select
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="rounded-md px-3 py-[9px] text-[13px] text-[var(--qz-fg-1)] outline-none cursor-pointer"
+              value={validDate ? MONTHS[validDate.getMonth()] : ""}
+              disabled
+              className="rounded-md px-3 py-[9px] text-[13px] text-[var(--qz-fg-2)] outline-none disabled:opacity-60"
               style={{ ...selectStyle, width: 130 }}
             >
-              {MONTHS.map((m) => <option key={m}>{m}</option>)}
+              {validDate ? (
+                <option>{MONTHS[validDate.getMonth()]}</option>
+              ) : (
+                <option value="">—</option>
+              )}
             </select>
           </div>
           <div>
             <label className="block text-[12px] text-[var(--qz-fg-3)] mb-[6px]">Year</label>
             <select
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-              className="rounded-md px-3 py-[9px] text-[13px] text-[var(--qz-fg-1)] outline-none cursor-pointer"
+              value={validDate ? String(validDate.getFullYear()) : ""}
+              disabled
+              className="rounded-md px-3 py-[9px] text-[13px] text-[var(--qz-fg-2)] outline-none disabled:opacity-60"
               style={{ ...selectStyle, width: 96 }}
             >
-              {Array.from({ length: 10 }, (_, i) => String(2020 + i)).map((y) => (
-                <option key={y}>{y}</option>
-              ))}
+              {validDate ? (
+                <option>{validDate.getFullYear()}</option>
+              ) : (
+                <option value="">—</option>
+              )}
             </select>
           </div>
           <label className="flex items-center gap-2 cursor-pointer text-[13px] text-[var(--qz-fg-2)] select-none pb-[10px]">
             <input
               type="checkbox"
-              checked={syncWithInternet}
-              onChange={(e) => setSyncWithInternet(e.target.checked)}
+              checked={ntpEnabled}
+              onChange={(e) => setNtpEnabled(e.target.checked)}
               className="w-[15px] h-[15px] cursor-pointer accent-[var(--qz-accent)]"
             />
-            Synchronize with internet
+            Synchronize with internet (NTP)
           </label>
         </div>
+        <p className="text-[11px] text-[var(--qz-fg-4)] mt-3">
+          The device clock is managed by NTP and read directly from the device. Manual date
+          setting is not exposed by the VyOS API.
+        </p>
       </div>
 
       <Divider />
@@ -230,17 +319,19 @@ function GeneralTab() {
               className="w-full rounded-md px-3 py-[9px] text-[13px] text-[var(--qz-fg-1)] outline-none cursor-pointer"
               style={selectStyle}
             >
-              {TIMEZONES.map((tz) => <option key={tz}>{tz}</option>)}
+              {(TIMEZONES.includes(timezone) ? TIMEZONES : [timezone, ...TIMEZONES]).map((tz) => (
+                <option key={tz}>{tz}</option>
+              ))}
             </select>
           </div>
-          {currentTime && (
+          {deviceTime && (
             <div className="flex flex-col justify-end">
               <span className="text-[11px] text-[var(--qz-fg-4)] mb-[6px]">Current Time</span>
               <span
                 className="text-[13px] text-[var(--qz-fg-2)]"
                 style={{ fontFamily: "var(--qz-font-mono)" }}
               >
-                {currentTime}
+                {deviceTime}
               </span>
             </div>
           )}
@@ -254,7 +345,8 @@ function GeneralTab() {
           <button
             type="button"
             onClick={addNtp}
-            className="flex items-center gap-[6px] px-3 py-[7px] text-[13px] font-medium rounded-md transition-colors cursor-pointer"
+            disabled={!ntpEnabled}
+            className="flex items-center gap-[6px] px-3 py-[7px] text-[13px] font-medium rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
               background: "transparent",
               border: "1px solid var(--qz-border)",
@@ -301,37 +393,41 @@ function GeneralTab() {
               <tbody>
                 {ntpServers.map((s, i) => (
                   <tr
-                    key={s.id}
+                    key={s.key}
                     style={{
                       borderBottom: i < ntpServers.length - 1 ? "1px solid var(--qz-border)" : "none",
                       background: "var(--qz-ink-0)",
                     }}
                   >
-                    <td
-                      className="px-4 py-[10px] text-[var(--qz-fg-2)]"
-                      style={{ fontFamily: "var(--qz-font-mono)" }}
-                    >
+                    <td className="px-4 py-[8px] text-[var(--qz-fg-2)]">
                       <div className="flex items-center gap-2">
                         <Clock size={13} className="text-[var(--qz-fg-4)] flex-shrink-0" />
-                        {s.server}
+                        <input
+                          value={s.server}
+                          onChange={(e) => updateNtp(s.key, e.target.value)}
+                          disabled={!ntpEnabled}
+                          placeholder="pool.ntp.org"
+                          className="flex-1 bg-transparent outline-none text-[13px] text-[var(--qz-fg-1)] disabled:opacity-60"
+                          style={{ fontFamily: "var(--qz-font-mono)", border: "none" }}
+                        />
                       </div>
                     </td>
                     <td
-                      className="px-4 py-[10px] text-[var(--qz-fg-3)]"
+                      className="px-4 py-[8px] text-[var(--qz-fg-3)]"
                       style={{ fontFamily: "var(--qz-font-mono)" }}
                     >
-                      {s.refId}
+                      {s.refId ?? "—"}
                     </td>
                     <td
-                      className="px-4 py-[10px] text-[var(--qz-fg-3)]"
+                      className="px-4 py-[8px] text-[var(--qz-fg-3)]"
                       style={{ fontFamily: "var(--qz-font-mono)" }}
                     >
-                      {s.pull}
+                      {s.pull ?? "—"}
                     </td>
-                    <td className="px-4 py-[10px] text-right">
+                    <td className="px-4 py-[8px] text-right">
                       <button
                         type="button"
-                        onClick={() => removeNtp(s.id)}
+                        onClick={() => removeNtp(s.key)}
                         disabled={!ntpEnabled}
                         className="text-[var(--qz-fg-4)] hover:text-[var(--qz-status-crit)] transition-colors cursor-pointer bg-transparent border-0 p-0 disabled:pointer-events-none"
                       >

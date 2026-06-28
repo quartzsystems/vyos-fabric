@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Plus, Trash2, X, Pencil, ChevronRight, Server, Eye, EyeOff, ExternalLink } from "lucide-react";
 import { useRouter } from "next/navigation";
-
-const API = "http://localhost:3001/api";
+import { slugify } from "@/lib/slug";
+import { API, fetchWithAuth } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -156,7 +156,7 @@ function SiteModal({
     try {
       const url = editing ? `${API}/sites/${initial!.id}` : `${API}/sites`;
       const method = editing ? "PATCH" : "POST";
-      const res = await fetch(url, {
+      const res = await fetchWithAuth(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -255,7 +255,7 @@ function AddDeviceModal({
     setSaving(true);
     setError("");
     try {
-      const res = await fetch(`${API}/routers`, {
+      const res = await fetchWithAuth(`${API}/routers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -424,7 +424,7 @@ function EditDeviceModal({
     setSaving(true);
     setError("");
     try {
-      const res = await fetch(`${API}/routers/${device.id}`, {
+      const res = await fetchWithAuth(`${API}/routers/${device.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -664,17 +664,11 @@ function DeviceTable({
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const handleManage = (device: Device) => {
-    localStorage.setItem("vyos-managed-device", JSON.stringify({
-      deviceId: device.id,
-      hostname: device.hostname,
-      siteId,
-      siteName,
-    }));
-    router.push("/");
+    router.push(`/${slugify(siteName)}/device/${device.id}`);
   };
 
   useEffect(() => {
-    fetch(`${API}/sites/${siteId}/routers`)
+    fetchWithAuth(`${API}/sites/${siteId}/routers`)
       .then((r) => r.json())
       .then(setDevices)
       .catch(() => {})
@@ -682,7 +676,7 @@ function DeviceTable({
   }, [siteId]);
 
   const deleteDevice = async (id: string) => {
-    await fetch(`${API}/routers/${id}`, { method: "DELETE" });
+    await fetchWithAuth(`${API}/routers/${id}`, { method: "DELETE" });
     setConfirmDelete(null);
     setDevices((prev) => prev.filter((d) => d.id !== id));
   };
@@ -842,7 +836,7 @@ export default function SitesPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/sites`);
+      const res = await fetchWithAuth(`${API}/sites`);
       setSites(await res.json());
     } catch {}
     finally { setLoading(false); }
@@ -851,7 +845,7 @@ export default function SitesPage() {
   useEffect(() => { load(); }, [load]);
 
   const deleteSite = async (id: string) => {
-    await fetch(`${API}/sites/${id}`, { method: "DELETE" });
+    await fetchWithAuth(`${API}/sites/${id}`, { method: "DELETE" });
     setConfirmDelete(null);
     setSites((prev) => prev.filter((s) => s.id !== id));
     setExpanded((prev) => { const n = new Set(prev); n.delete(id); return n; });
