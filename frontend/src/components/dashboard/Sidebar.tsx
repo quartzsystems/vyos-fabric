@@ -84,7 +84,18 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
       ],
     },
     { id: "routing",     label: "Routing",    icon: Route,           href: `${basePath}/routing` },
-    { id: "nat",         label: "NAT",        icon: ArrowLeftRight,  href: `${basePath}/nat` },
+    {
+      id: "nat",
+      label: "NAT",
+      icon: ArrowLeftRight,
+      href: `${basePath}/nat`,
+      children: [
+        { id: "nat44", label: "NAT44", href: `${basePath}/nat/nat44`, icon: ArrowLeftRight },
+        { id: "nat64", label: "NAT64", href: `${basePath}/nat/nat64`, icon: Shuffle },
+        { id: "nat66", label: "NAT66", href: `${basePath}/nat/nat66`, icon: Forward },
+        { id: "cgnat", label: "CGNAT", href: `${basePath}/nat/cgnat`, icon: Boxes },
+      ],
+    },
     { id: "firewall",    label: "Firewall",   icon: Shield,          href: `${basePath}/firewall` },
     {
       id: "services",

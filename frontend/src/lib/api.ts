@@ -535,6 +535,53 @@ export interface WebProxyConfig {
   url_filtering: boolean;
 }
 
+export interface NatRule {
+  rule: string;
+  description: string | null;
+  interface: string | null;
+  source: string | null;
+  destination: string | null;
+  translation: string | null;
+  translation_port: string | null;
+  protocol: string | null;
+  log: boolean;
+  enabled: boolean;
+}
+
+export interface Nat44Config {
+  source: NatRule[];
+  destination: NatRule[];
+}
+
+export interface Nat64Config {
+  source: NatRule[];
+}
+
+export interface Nat66Config {
+  source: NatRule[];
+  destination: NatRule[];
+}
+
+export interface CgnatPool {
+  kind: string;
+  name: string;
+  ranges: string[];
+  external_port_range: string | null;
+}
+
+export interface CgnatRule {
+  rule: string;
+  description: string | null;
+  source_pool: string | null;
+  translation_pool: string | null;
+  enabled: boolean;
+}
+
+export interface CgnatConfig {
+  pools: CgnatPool[];
+  rules: CgnatRule[];
+}
+
 export interface NtpServerLive {
   server: string;
   ref_id: string | null;
@@ -832,6 +879,24 @@ export function fetchTftpServer(deviceId: string): Promise<TftpServerConfig> {
 
 export function fetchWebProxy(deviceId: string): Promise<WebProxyConfig> {
   return request(`/routers/${deviceId}/services/web-proxy`);
+}
+
+// ── NAT ──────────────────────────────────────────────────────────────────────
+
+export function fetchNat44(deviceId: string): Promise<Nat44Config> {
+  return request(`/routers/${deviceId}/nat/nat44`);
+}
+
+export function fetchNat64(deviceId: string): Promise<Nat64Config> {
+  return request(`/routers/${deviceId}/nat/nat64`);
+}
+
+export function fetchNat66(deviceId: string): Promise<Nat66Config> {
+  return request(`/routers/${deviceId}/nat/nat66`);
+}
+
+export function fetchCgnat(deviceId: string): Promise<CgnatConfig> {
+  return request(`/routers/${deviceId}/nat/cgnat`);
 }
 
 // ── System config ────────────────────────────────────────────────────────────
