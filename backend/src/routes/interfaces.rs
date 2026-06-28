@@ -6,6 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
+    auth::{AuthUser, Claims},
     error::{AppError, Result},
     models::{EthernetInterface, VlanInterface},
     state::AppState,
@@ -60,8 +61,8 @@ fn is_enabled(v: &Value) -> bool {
 /// pattern that works for the System page (`["system"]` → `host-name`). Querying the tag
 /// node directly (`["interfaces","ethernet"]`) gets wrapped as `{"ethernet": {...}}` on some
 /// VyOS versions, which is why a single bogus "ethernet" row showed up.
-async fn ethernet_config(state: &AppState, id: Uuid) -> Result<Value> {
-    let client = fetch_client(state, id).await?;
+async fn ethernet_config(state: &AppState, claims: &Claims, id: Uuid) -> Result<Value> {
+    let client = fetch_client(state, claims, id).await?;
     let resp = client
         .show_config(&["interfaces"])
         .await
@@ -88,9 +89,10 @@ async fn ethernet_config(state: &AppState, id: Uuid) -> Result<Value> {
 
 async fn list_ethernet(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<EthernetInterface>>> {
-    let data = ethernet_config(&state, id).await?;
+    let data = ethernet_config(&state, &claims, id).await?;
 
     let mut out: Vec<EthernetInterface> = data
         .as_object()
@@ -117,9 +119,10 @@ async fn list_ethernet(
 
 async fn list_vlan(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<VlanInterface>>> {
-    let data = ethernet_config(&state, id).await?;
+    let data = ethernet_config(&state, &claims, id).await?;
 
     let mut out: Vec<VlanInterface> = Vec::new();
     if let Some(eths) = data.as_object() {

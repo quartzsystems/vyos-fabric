@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Trash2, X, Building2, Pencil } from "lucide-react";
-import { API, fetchWithAuth } from "@/lib/api";
+import { API, fetchWithAuth, isAdmin } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -611,12 +612,18 @@ function EditUserModal({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function UsersPage() {
+  const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  // User management is admin-only (backend also enforces this).
+  useEffect(() => {
+    if (!isAdmin()) router.replace("/controller/sites");
+  }, [router]);
 
   const load = useCallback(async () => {
     try {

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useDevice } from "@/lib/DeviceContext";
-import { clearSession } from "@/lib/api";
+import { logout as apiLogout } from "@/lib/api";
 
 interface NavChild {
   id: string;
@@ -79,8 +79,8 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
   const isOpen = (item: NavItem) => openMenus[item.id] ?? pathname.startsWith(item.href);
 
-  const logout = () => {
-    clearSession();
+  const logout = async () => {
+    await apiLogout();
     router.push("/login");
   };
 
@@ -196,31 +196,18 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
           style={{ borderTop: "1px solid var(--qz-border)" }}
         >
           <div
-            className="rounded-md p-3 mt-3"
+            className="rounded-md p-3 mt-3 flex items-center gap-[10px]"
             style={{
               background: "var(--qz-input-bg)",
               border: "1px solid var(--qz-border)",
             }}
           >
-            <p className="text-[10px] font-semibold text-[var(--qz-fg-4)] uppercase tracking-wider m-0 mb-[8px]">
-              Managing
-            </p>
-            <div className="flex items-center gap-[7px] mb-[4px]">
-              <Server size={12} className="text-[var(--qz-accent)] flex-shrink-0" />
-              <span className="text-[13px] font-semibold text-[var(--qz-fg-1)] truncate">
-                {device.hostname}
-              </span>
-            </div>
-            <div className="flex items-center gap-[7px] mb-3">
-              <Building2 size={12} className="text-[var(--qz-fg-4)] flex-shrink-0" />
-              <span className="text-[12px] text-[var(--qz-fg-3)] truncate">
-                {device.siteName}
-              </span>
-            </div>
             <button
               type="button"
               onClick={exitDevice}
-              className="flex items-center gap-[6px] w-full px-2 py-[6px] rounded-md text-[12px] font-medium cursor-pointer transition-colors"
+              title="Back to Sites"
+              aria-label="Back to Sites"
+              className="flex-shrink-0 grid place-items-center w-8 h-8 rounded-md cursor-pointer transition-colors"
               style={{
                 background: "transparent",
                 border: "1px solid var(--qz-border)",
@@ -235,9 +222,19 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
                 e.currentTarget.style.color = "var(--qz-fg-3)";
               }}
             >
-              <ArrowLeft size={12} />
-              Back to Sites
+              <ArrowLeft size={16} />
             </button>
+            <div className="min-w-0">
+              <div className="text-[13px] font-semibold text-[var(--qz-fg-1)] truncate">
+                {device.hostname}
+              </div>
+              <div className="flex items-center gap-[6px] mt-[3px]">
+                <Building2 size={16} className="text-[var(--qz-fg-4)] flex-shrink-0" />
+                <span className="text-[12px] text-[var(--qz-fg-3)] truncate">
+                  {device.siteName}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       )}

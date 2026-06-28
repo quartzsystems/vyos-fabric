@@ -320,8 +320,10 @@ async fn discard_one(
 
 async fn discard_all(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>> {
+    authorize_router(&state.db, &claims, id).await?;
     let result = sqlx::query(
         "DELETE FROM config_changes WHERE router_id = $1 AND status = 'pending'",
     )
@@ -335,10 +337,11 @@ async fn discard_all(
 
 async fn commit(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
-    body: Option<Json<ActorBody>>,
 ) -> Result<Json<CommitWithChanges>> {
-    let actor = body.map(|Json(b)| b.created_by).unwrap_or(None);
+    authorize_router(&state.db, &claims, id).await?;
+    let actor = Some(claims.sub);
 
     let pending = sqlx::query_as::<_, ConfigChange>(&format!(
         "SELECT {CHANGE_COLS} FROM config_changes
@@ -352,7 +355,7 @@ async fn commit(
         return Err(AppError::Gateway("no pending changes to commit".into()));
     }
 
-    let client = fetch_client(&state, id).await?;
+    let client = fetch_client(&state, &claims, id).await?;
 
     let cmds: Vec<Value> = pending
         .iter()
@@ -427,8 +430,10 @@ async fn commit(
 
 async fn list_commits(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<CommitWithChanges>>> {
+    authorize_router(&state.db, &claims, id).await?;
     let commits = sqlx::query_as::<_, ConfigCommit>(&format!(
         "SELECT {COMMIT_COLS} FROM config_commits
          WHERE router_id = $1 ORDER BY committed_at DESC LIMIT 50"

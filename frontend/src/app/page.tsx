@@ -2,14 +2,16 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getToken } from "@/lib/api";
+import { fetchMe } from "@/lib/api";
 
-/// Root gate: force authentication before anything else.
+/// Root gate: confirm the session (httpOnly cookie) before routing anywhere.
 export default function RootPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace(getToken() ? "/controller/sites" : "/login");
+    fetchMe()
+      .then(() => router.replace("/controller/sites"))
+      .catch(() => router.replace("/login"));
   }, [router]);
 
   return null;

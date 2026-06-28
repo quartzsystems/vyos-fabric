@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
-import { API, setSession } from "@/lib/api";
+import { API, setUser } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,6 +24,7 @@ export default function LoginPage() {
     try {
       const res = await fetch(`${API}/auth/login`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
@@ -31,8 +32,8 @@ export default function LoginPage() {
         setError("Invalid username or password.");
         return;
       }
-      const { token, ...user } = await res.json();
-      setSession(token, user);
+      // Session is set via httpOnly cookie; the body is the user (for display/role).
+      setUser(await res.json());
       router.push("/controller");
     } catch {
       setError("Could not reach the server. Is the backend running?");

@@ -4,7 +4,7 @@ import { Building2, Users, LogOut, LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { clearSession } from "@/lib/api";
+import { logout as apiLogout } from "@/lib/api";
 
 interface NavItem {
   id: string;
@@ -17,6 +17,7 @@ interface AuthUser {
   first_name: string;
   last_name: string;
   username: string;
+  role: string;
 }
 
 function initials(user: AuthUser): string {
@@ -50,8 +51,11 @@ function ControllerSidebar() {
 
   const isActive = (href: string) => pathname.startsWith(href);
 
-  const logout = () => {
-    clearSession();
+  // User management is admin-only — hide the nav item for everyone else.
+  const navItems = items.filter((it) => it.id !== "users" || user?.role === "admin");
+
+  const logout = async () => {
+    await apiLogout();
     router.push("/login");
   };
 
@@ -79,7 +83,7 @@ function ControllerSidebar() {
 
       {/* Nav */}
       <div className="flex-1 overflow-auto px-3 flex flex-col gap-[2px] pt-3">
-        {items.map((item) => {
+        {navItems.map((item) => {
           const active = isActive(item.href);
           const Icon = item.icon;
           return (

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Plus, Trash2, X, Pencil, ChevronRight, Server, Eye, EyeOff, ExternalLink } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { slugify } from "@/lib/slug";
-import { API, fetchWithAuth } from "@/lib/api";
+import { API, fetchWithAuth, isAdmin } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -579,7 +579,7 @@ function EditDeviceModal({
               <RevealInput
                 value={apiKey}
                 onChange={setApiKey}
-                placeholder="API key…"
+                placeholder="•••••••• leave blank to keep"
               />
             </div>
             <div>
@@ -620,7 +620,7 @@ function EditDeviceModal({
               <RevealInput
                 value={sshPass}
                 onChange={setSshPass}
-                placeholder="Password…"
+                placeholder="•••••••• leave blank to keep"
               />
             </div>
             <div>
@@ -663,6 +663,8 @@ function DeviceTable({
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
+  const admin = isAdmin();
+
   const handleManage = (device: Device) => {
     router.push(`/${slugify(siteName)}/device/${device.id}`);
   };
@@ -691,15 +693,17 @@ function DeviceTable({
       ) : devices.length === 0 ? (
         <div className="px-10 py-4 flex items-center gap-4">
           <p className="text-[12px] text-[var(--qz-fg-4)] m-0">No devices in this site.</p>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setAddOpen(true); }}
-            className="flex items-center gap-[5px] text-[12px] font-semibold cursor-pointer border-0 px-3 py-[6px] rounded-md"
-            style={{ background: "var(--qz-accent)", color: "var(--qz-fg-on-accent)" }}
-          >
-            <Plus size={12} />
-            Add Device
-          </button>
+          {admin && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setAddOpen(true); }}
+              className="flex items-center gap-[5px] text-[12px] font-semibold cursor-pointer border-0 px-3 py-[6px] rounded-md"
+              style={{ background: "var(--qz-accent)", color: "var(--qz-fg-on-accent)" }}
+            >
+              <Plus size={12} />
+              Add Device
+            </button>
+          )}
         </div>
       ) : (
         <>
@@ -754,31 +758,35 @@ function DeviceTable({
                         <ExternalLink size={11} />
                         Manage
                       </button>
-                      <button
-                        type="button"
-                        title="Edit device"
-                        onClick={() => { setEditingDevice(d); setConfirmDelete(null); }}
-                        className="text-[var(--qz-fg-4)] hover:text-[var(--qz-fg-1)] transition-colors cursor-pointer bg-transparent border-0 p-0"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      {confirmDelete === d.id ? (
-                        <button
-                          type="button"
-                          onClick={() => deleteDevice(d.id)}
-                          className="text-[11px] font-semibold px-2 py-[4px] rounded cursor-pointer border-0"
-                          style={{ background: "var(--qz-status-crit)", color: "white" }}
-                        >
-                          Confirm
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDelete(d.id)}
-                          className="text-[var(--qz-fg-4)] hover:text-[var(--qz-status-crit)] transition-colors cursor-pointer bg-transparent border-0 p-0"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                      {admin && (
+                        <>
+                          <button
+                            type="button"
+                            title="Edit device"
+                            onClick={() => { setEditingDevice(d); setConfirmDelete(null); }}
+                            className="text-[var(--qz-fg-4)] hover:text-[var(--qz-fg-1)] transition-colors cursor-pointer bg-transparent border-0 p-0"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          {confirmDelete === d.id ? (
+                            <button
+                              type="button"
+                              onClick={() => deleteDevice(d.id)}
+                              className="text-[11px] font-semibold px-2 py-[4px] rounded cursor-pointer border-0"
+                              style={{ background: "var(--qz-status-crit)", color: "white" }}
+                            >
+                              Confirm
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDelete(d.id)}
+                              className="text-[var(--qz-fg-4)] hover:text-[var(--qz-status-crit)] transition-colors cursor-pointer bg-transparent border-0 p-0"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </td>
@@ -786,17 +794,19 @@ function DeviceTable({
               ))}
             </tbody>
           </table>
-          <div className="px-10 py-3" style={{ borderTop: "1px solid var(--qz-border)" }}>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); setAddOpen(true); }}
-              className="flex items-center gap-[5px] text-[12px] font-semibold cursor-pointer border-0 px-3 py-[6px] rounded-md"
-              style={{ background: "var(--qz-accent)", color: "var(--qz-fg-on-accent)" }}
-            >
-              <Plus size={12} />
-              Add Device
-            </button>
-          </div>
+          {admin && (
+            <div className="px-10 py-3" style={{ borderTop: "1px solid var(--qz-border)" }}>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setAddOpen(true); }}
+                className="flex items-center gap-[5px] text-[12px] font-semibold cursor-pointer border-0 px-3 py-[6px] rounded-md"
+                style={{ background: "var(--qz-accent)", color: "var(--qz-fg-on-accent)" }}
+              >
+                <Plus size={12} />
+                Add Device
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -833,6 +843,7 @@ export default function SitesPage() {
   const [editingSite, setEditingSite]   = useState<Site | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [expanded, setExpanded]         = useState<Set<string>>(new Set());
+  const admin = isAdmin();
 
   const load = useCallback(async () => {
     try {
@@ -867,15 +878,17 @@ export default function SitesPage() {
         <h1 className="text-[28px] font-bold text-[var(--qz-fg-1)] m-0" style={{ letterSpacing: "-0.015em" }}>
           Sites
         </h1>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); setAddOpen(true); }}
-          className="flex items-center gap-[7px] px-4 py-[9px] rounded-md text-[13.5px] font-semibold cursor-pointer border-0"
-          style={{ background: "var(--qz-accent)", color: "var(--qz-fg-on-accent)" }}
-        >
-          <Plus size={15} />
-          Add Site
-        </button>
+        {admin && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setAddOpen(true); }}
+            className="flex items-center gap-[7px] px-4 py-[9px] rounded-md text-[13.5px] font-semibold cursor-pointer border-0"
+            style={{ background: "var(--qz-accent)", color: "var(--qz-fg-on-accent)" }}
+          >
+            <Plus size={15} />
+            Add Site
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -936,32 +949,36 @@ export default function SitesPage() {
                             className="flex items-center justify-end gap-2"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <button
-                              type="button"
-                              title="Edit site"
-                              onClick={() => { setEditingSite(site); setConfirmDelete(null); }}
-                              className="text-[var(--qz-fg-4)] hover:text-[var(--qz-fg-1)] transition-colors cursor-pointer bg-transparent border-0 p-0"
-                            >
-                              <Pencil size={14} />
-                            </button>
+                            {admin && (
+                              <>
+                                <button
+                                  type="button"
+                                  title="Edit site"
+                                  onClick={() => { setEditingSite(site); setConfirmDelete(null); }}
+                                  className="text-[var(--qz-fg-4)] hover:text-[var(--qz-fg-1)] transition-colors cursor-pointer bg-transparent border-0 p-0"
+                                >
+                                  <Pencil size={14} />
+                                </button>
 
-                            {confirmDelete === site.id ? (
-                              <button
-                                type="button"
-                                onClick={() => deleteSite(site.id)}
-                                className="text-[12px] font-semibold px-3 py-[5px] rounded cursor-pointer border-0"
-                                style={{ background: "var(--qz-status-crit)", color: "white" }}
-                              >
-                                Confirm
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDelete(site.id)}
-                                className="text-[var(--qz-fg-4)] hover:text-[var(--qz-status-crit)] transition-colors cursor-pointer bg-transparent border-0 p-0"
-                              >
-                                <Trash2 size={14} />
-                              </button>
+                                {confirmDelete === site.id ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteSite(site.id)}
+                                    className="text-[12px] font-semibold px-3 py-[5px] rounded cursor-pointer border-0"
+                                    style={{ background: "var(--qz-status-crit)", color: "white" }}
+                                  >
+                                    Confirm
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDelete(site.id)}
+                                    className="text-[var(--qz-fg-4)] hover:text-[var(--qz-status-crit)] transition-colors cursor-pointer bg-transparent border-0 p-0"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </>
                             )}
                           </div>
                         </td>

@@ -2,21 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getToken } from "@/lib/api";
+import { fetchMe } from "@/lib/api";
 
-/// Client-side auth gate for snappy redirects. The server enforces auth on every
-/// request, so a missing/expired token is rejected there too; this just avoids
-/// rendering protected UI when there's no token.
+/// Auth gate. The session is an httpOnly cookie (invisible to JS), so we confirm it with the
+/// backend via /auth/me. The server enforces auth on every request regardless; this just
+/// avoids rendering protected UI for an unauthenticated visitor and refreshes the cached user.
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [authed, setAuthed] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!getToken()) {
-      router.replace("/login");
-      return;
-    }
-    setAuthed(true);
+    fetchMe()
+      .then(() => setAuthed(true))
+      .catch(() => router.replace("/login"));
   }, [router]);
 
   if (!authed) return null;

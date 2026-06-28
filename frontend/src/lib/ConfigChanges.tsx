@@ -13,7 +13,6 @@ import {
   discardAllChanges,
   discardChange,
   fetchChanges,
-  getCurrentUserId,
   stageSystem,
   SystemUpdate,
 } from "./api";
@@ -68,10 +67,7 @@ export function ConfigChangesProvider({ children }: { children: React.ReactNode 
         setToast("No device selected.");
         return [];
       }
-      const staged = await stageSystem(deviceId, {
-        ...update,
-        created_by: getCurrentUserId(),
-      });
+      const staged = await stageSystem(deviceId, update);
       await refresh();
       setToast(
         staged.length === 0
@@ -103,7 +99,7 @@ export function ConfigChangesProvider({ children }: { children: React.ReactNode 
   const commit = useCallback(async () => {
     if (!deviceId) return false;
     try {
-      const result = await commitChanges(deviceId, getCurrentUserId());
+      const result = await commitChanges(deviceId);
       await refresh();
       if (result.status === "success") {
         setToast(

@@ -1,37 +1,59 @@
 // Central API base + helpers for talking to the Rust backend.
+//
+// Auth is an httpOnly cookie set by the backend. The browser calls /api on its OWN origin
+// (Next.js rewrites proxy to the backend), so the cookie is first-party and sent automatically.
+// JS can't read the token; the only client-side session state is a non-sensitive cached user
+// (for display + role-based UI gating). The server is the real enforcement.
 
-export const API = "http://localhost:3001/api";
+export const API = "/api";
 
-// ── Local session ────────────────────────────────────────────────────────────
-
-const TOKEN_KEY = "vyos-token";
 const USER_KEY = "vyos-user";
 
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
+export interface AuthUserInfo {
+  id: string;
+  first_name?: string;
+  last_name?: string;
+  username: string;
+  role: string;
+  site_access?: { site_id: string; site_name: string; role: string }[];
 }
 
-export function setSession(token: string, user: unknown): void {
+export function setUser(user: AuthUserInfo): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+export function getCurrentUser(): AuthUserInfo | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? (JSON.parse(raw) as AuthUserInfo) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isAdmin(): boolean {
+  return getCurrentUser()?.role === "admin";
 }
 
 export function clearSession(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 }
 
-export function getCurrentUserId(): string | null {
-  if (typeof window === "undefined") return null;
+/// Confirm the session with the backend (cookie is invisible to JS) and refresh the cached user.
+export async function fetchMe(): Promise<AuthUserInfo> {
+  const user = await apiFetch<AuthUserInfo>("/auth/me");
+  setUser(user);
+  return user;
+}
+
+export async function logout(): Promise<void> {
   try {
-    const raw = localStorage.getItem(USER_KEY);
-    return raw ? (JSON.parse(raw)?.id ?? null) : null;
-  } catch {
-    return null;
-  }
+    await fetch(`${API}/auth/logout`, { method: "POST", credentials: "include" });
+  } catch {}
+  clearSession();
 }
 
 // ── Wire types (mirror backend models) ───────────────────────────────────────
@@ -95,7 +117,6 @@ export interface SystemUpdate {
   time_zone?: string;
   ntp_enabled?: boolean;
   ntp_servers?: string[];
-  created_by?: string | null;
 }
 
 export interface ConfigChange {
@@ -132,19 +153,20 @@ export interface CommitWithChanges extends ConfigCommit {
 /// Authenticated fetch against the API. Attaches the Bearer token, and on a 401
 /// clears the session and bounces to /login (enforcement is real on the server).
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getToken();
   const res = await fetch(`${API}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });
 
   if (res.status === 401) {
     clearSession();
-    if (typeof window !== "undefined") window.location.href = "/login";
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
     throw new Error("Session expired. Please sign in again.");
   }
 
@@ -168,18 +190,19 @@ const request = apiFetch;
 /// or read the body themselves). Attaches the Bearer token; bounces to /login on 401.
 /// `url` is a full URL (typically `${API}/...`).
 export async function fetchWithAuth(url: string, init?: RequestInit): Promise<Response> {
-  const token = getToken();
   const res = await fetch(url, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });
   if (res.status === 401) {
     clearSession();
-    if (typeof window !== "undefined") window.location.href = "/login";
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
   }
   return res;
 }
@@ -229,14 +252,8 @@ export function discardAllChanges(deviceId: string): Promise<void> {
   return request(`/routers/${deviceId}/changes`, { method: "DELETE" });
 }
 
-export function commitChanges(
-  deviceId: string,
-  createdBy: string | null,
-): Promise<CommitWithChanges> {
-  return request(`/routers/${deviceId}/commit`, {
-    method: "POST",
-    body: JSON.stringify({ created_by: createdBy }),
-  });
+export function commitChanges(deviceId: string): Promise<CommitWithChanges> {
+  return request(`/routers/${deviceId}/commit`, { method: "POST" });
 }
 
 export function fetchCommits(deviceId: string): Promise<CommitWithChanges[]> {
