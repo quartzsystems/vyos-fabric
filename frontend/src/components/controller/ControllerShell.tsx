@@ -82,7 +82,7 @@ function ControllerSidebar() {
       </div>
 
       {/* Nav */}
-      <div className="flex-1 overflow-auto px-3 flex flex-col gap-[2px] pt-3">
+      <div className="flex-1 min-h-0 overflow-auto px-3 flex flex-col gap-[2px] pt-3">
         {navItems.map((item) => {
           const active = isActive(item.href);
           const Icon = item.icon;
@@ -137,7 +137,7 @@ export function ControllerShell({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="h-screen overflow-hidden"
-      style={{ display: "grid", gridTemplateColumns: "240px 1fr" }}
+      style={{ display: "grid", gridTemplateColumns: "240px 1fr", gridTemplateRows: "minmax(0, 1fr)" }}
     >
       <ControllerSidebar />
       <main className="overflow-auto" style={{ background: "var(--qz-bg)" }}>

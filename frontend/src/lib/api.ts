@@ -96,6 +96,445 @@ export interface VlanInterface {
   enabled: boolean;
 }
 
+export interface BondingInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  mode: string | null;
+  members: string[];
+  enabled: boolean;
+}
+
+export interface BridgeInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  members: string[];
+  enabled: boolean;
+}
+
+export interface DummyInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  enabled: boolean;
+}
+
+export interface GeneveInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  vni: string | null;
+  remote: string | null;
+  enabled: boolean;
+}
+
+export interface L2tpv3Interface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  source_address: string | null;
+  remote: string | null;
+  tunnel_id: string | null;
+  peer_tunnel_id: string | null;
+  session_id: string | null;
+  peer_session_id: string | null;
+  encapsulation: string | null;
+  enabled: boolean;
+}
+
+export interface LoopbackInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  enabled: boolean;
+}
+
+export interface MacsecInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  source_interface: string | null;
+  cipher: string | null;
+  enabled: boolean;
+}
+
+export interface OpenvpnInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  mode: string | null;
+  protocol: string | null;
+  local_host: string | null;
+  remote_host: string | null;
+  enabled: boolean;
+}
+
+export interface WireguardInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  port: string | null;
+  peer_count: number;
+  enabled: boolean;
+}
+
+export interface PppoeInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  source_interface: string | null;
+  username: string | null;
+  enabled: boolean;
+}
+
+export interface MacvlanInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  source_interface: string | null;
+  mode: string | null;
+  enabled: boolean;
+}
+
+export interface SstpcInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  server: string | null;
+  username: string | null;
+  enabled: boolean;
+}
+
+export interface TunnelInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  encapsulation: string | null;
+  source_address: string | null;
+  remote: string | null;
+  enabled: boolean;
+}
+
+export interface VethInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  peer_name: string | null;
+  enabled: boolean;
+}
+
+export interface VtiInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  enabled: boolean;
+}
+
+export interface VxlanInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  vni: string | null;
+  remote: string | null;
+  source_address: string | null;
+  port: string | null;
+  enabled: boolean;
+}
+
+export interface WlanInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  interface_type: string | null;
+  ssid: string | null;
+  channel: string | null;
+  enabled: boolean;
+}
+
+export interface WwanInterface {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  apn: string | null;
+  enabled: boolean;
+}
+
+export interface DhcpRange {
+  name: string;
+  start: string | null;
+  stop: string | null;
+}
+
+export interface DhcpStaticMapping {
+  name: string;
+  ip_address: string | null;
+  mac_address: string | null;
+  description: string | null;
+}
+
+export interface DhcpSubnet {
+  subnet: string;
+  default_router: string | null;
+  name_servers: string[];
+  domain_name: string | null;
+  lease: string | null;
+  ranges: DhcpRange[];
+  static_mappings: DhcpStaticMapping[];
+}
+
+export interface DhcpServer {
+  name: string;
+  enabled: boolean;
+  authoritative: boolean;
+  description: string | null;
+  subnets: DhcpSubnet[];
+}
+
+export interface DhcpLease {
+  ip_address: string;
+  mac_address: string | null;
+  state: string | null;
+  lease_start: string | null;
+  lease_expiration: string | null;
+  remaining: string | null;
+  pool: string | null;
+  hostname: string | null;
+}
+
+export interface DhcpServerConfig {
+  servers: DhcpServer[];
+  leases: DhcpLease[];
+}
+
+export interface DhcpRelayConfig {
+  interfaces: string[];
+  servers: string[];
+}
+
+export interface Dhcpv6RelayInterface {
+  interface: string;
+  address: string | null;
+}
+
+export interface Dhcpv6RelayConfig {
+  listen_interfaces: Dhcpv6RelayInterface[];
+  upstream_interfaces: Dhcpv6RelayInterface[];
+}
+
+export interface Dhcpv6Range {
+  name: string;
+  start: string | null;
+  stop: string | null;
+}
+
+export interface Dhcpv6StaticMapping {
+  name: string;
+  identifier: string | null;
+  ipv6_address: string | null;
+  ipv6_prefix: string | null;
+  description: string | null;
+}
+
+export interface Dhcpv6Subnet {
+  subnet: string;
+  name_servers: string[];
+  domain_search: string[];
+  lease: string | null;
+  ranges: Dhcpv6Range[];
+  static_mappings: Dhcpv6StaticMapping[];
+}
+
+export interface Dhcpv6Server {
+  name: string;
+  enabled: boolean;
+  description: string | null;
+  subnets: Dhcpv6Subnet[];
+}
+
+export interface Dhcpv6ServerConfig {
+  servers: Dhcpv6Server[];
+  leases: DhcpLease[];
+}
+
+export interface BroadcastRelayId {
+  id: string;
+  interfaces: string[];
+  address: string | null;
+  port: string | null;
+  description: string | null;
+  enabled: boolean;
+}
+
+export interface ConfigSyncConfig {
+  mode: string | null;
+  secondary_address: string | null;
+  secondary_username: string | null;
+  sections: string[];
+}
+
+export interface ConntrackSyncConfig {
+  interfaces: string[];
+  failover_mechanism: string | null;
+  mcast_group: string | null;
+  sync_queue_size: string | null;
+  accept_protocols: string[];
+}
+
+export interface ConsoleServerDevice {
+  name: string;
+  speed: string | null;
+  data_bits: string | null;
+  stop_bits: string | null;
+  parity: string | null;
+  ssh_port: string | null;
+  description: string | null;
+}
+
+export interface DnsForwardingDomain {
+  name: string;
+  name_servers: string[];
+}
+
+export interface DnsForwardingConfig {
+  cache_size: string | null;
+  listen_addresses: string[];
+  allow_from: string[];
+  name_servers: string[];
+  system: boolean;
+  dnssec: string | null;
+  domains: DnsForwardingDomain[];
+}
+
+export interface DynamicDnsEntry {
+  name: string;
+  address: string | null;
+  protocol: string | null;
+  server: string | null;
+  username: string | null;
+  host_names: string[];
+}
+
+export interface EventHandlerEntry {
+  name: string;
+  pattern: string | null;
+  script: string | null;
+  description: string | null;
+}
+
+export interface HttpsConfig {
+  listen_addresses: string[];
+  port: string | null;
+  api_enabled: boolean;
+  certificates: string[];
+  allow_clients: string[];
+}
+
+export interface IpoeServerConfig {
+  interfaces: string[];
+  auth_mode: string | null;
+  gateway_addresses: string[];
+  pools: string[];
+}
+
+export interface LldpConfig {
+  interfaces: string[];
+  snmp: boolean;
+  legacy_protocols: string[];
+}
+
+export interface MdnsRepeaterConfig {
+  interfaces: string[];
+  vrf: string | null;
+  enabled: boolean;
+}
+
+export interface MonitoringConfig {
+  telegraf_enabled: boolean;
+  prometheus_enabled: boolean;
+  exporters: string[];
+}
+
+export interface NtpConfig {
+  servers: string[];
+  listen_addresses: string[];
+  allow_clients: string[];
+}
+
+export interface PppoeServerConfig {
+  access_concentrator: string | null;
+  interfaces: string[];
+  gateway_address: string | null;
+  auth_mode: string | null;
+  pools: string[];
+}
+
+export interface RouterAdvertInterface {
+  interface: string;
+  prefixes: string[];
+  managed_flag: boolean;
+  interval_max: string | null;
+  default_lifetime: string | null;
+}
+
+export interface SaltMinionConfig {
+  id: string | null;
+  masters: string[];
+  interval: string | null;
+}
+
+export interface SnmpCommunity {
+  name: string;
+  authorization: string | null;
+}
+
+export interface SnmpConfig {
+  contact: string | null;
+  location: string | null;
+  listen_addresses: string[];
+  communities: SnmpCommunity[];
+  v3_users: string[];
+}
+
+export interface SshConfig {
+  ports: string[];
+  listen_addresses: string[];
+  password_authentication_disabled: boolean;
+  allow_users: string[];
+}
+
+export interface TftpServerConfig {
+  directory: string | null;
+  allow_upload: boolean;
+  listen_addresses: string[];
+  port: string | null;
+}
+
+export interface WebProxyConfig {
+  listen_addresses: string[];
+  cache_size: string | null;
+  default_port: string | null;
+  url_filtering: boolean;
+}
+
 export interface NtpServerLive {
   server: string;
   ref_id: string | null;
@@ -223,6 +662,176 @@ export function fetchEthernet(deviceId: string): Promise<EthernetInterface[]> {
 
 export function fetchVlans(deviceId: string): Promise<VlanInterface[]> {
   return request(`/routers/${deviceId}/interfaces/vlan`);
+}
+
+export function fetchBonding(deviceId: string): Promise<BondingInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/bonding`);
+}
+
+export function fetchBridge(deviceId: string): Promise<BridgeInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/bridge`);
+}
+
+export function fetchDummy(deviceId: string): Promise<DummyInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/dummy`);
+}
+
+export function fetchGeneve(deviceId: string): Promise<GeneveInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/geneve`);
+}
+
+export function fetchL2tpv3(deviceId: string): Promise<L2tpv3Interface[]> {
+  return request(`/routers/${deviceId}/interfaces/l2tpv3`);
+}
+
+export function fetchLoopback(deviceId: string): Promise<LoopbackInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/loopback`);
+}
+
+export function fetchMacsec(deviceId: string): Promise<MacsecInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/macsec`);
+}
+
+export function fetchOpenvpn(deviceId: string): Promise<OpenvpnInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/openvpn`);
+}
+
+export function fetchWireguard(deviceId: string): Promise<WireguardInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/wireguard`);
+}
+
+export function fetchPppoe(deviceId: string): Promise<PppoeInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/pppoe`);
+}
+
+export function fetchMacvlan(deviceId: string): Promise<MacvlanInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/macvlan`);
+}
+
+export function fetchSstpc(deviceId: string): Promise<SstpcInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/sstpc`);
+}
+
+export function fetchTunnel(deviceId: string): Promise<TunnelInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/tunnel`);
+}
+
+export function fetchVeth(deviceId: string): Promise<VethInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/veth`);
+}
+
+export function fetchVti(deviceId: string): Promise<VtiInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/vti`);
+}
+
+export function fetchVxlan(deviceId: string): Promise<VxlanInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/vxlan`);
+}
+
+export function fetchWlan(deviceId: string): Promise<WlanInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/wlan`);
+}
+
+export function fetchWwan(deviceId: string): Promise<WwanInterface[]> {
+  return request(`/routers/${deviceId}/interfaces/wwan`);
+}
+
+// ── Services ─────────────────────────────────────────────────────────────────
+
+export function fetchDhcpServer(deviceId: string): Promise<DhcpServerConfig> {
+  return request(`/routers/${deviceId}/services/dhcp-server`);
+}
+
+export function fetchDhcpRelay(deviceId: string): Promise<DhcpRelayConfig> {
+  return request(`/routers/${deviceId}/services/dhcp-relay`);
+}
+
+export function fetchDhcpv6Server(deviceId: string): Promise<Dhcpv6ServerConfig> {
+  return request(`/routers/${deviceId}/services/dhcpv6-server`);
+}
+
+export function fetchDhcpv6Relay(deviceId: string): Promise<Dhcpv6RelayConfig> {
+  return request(`/routers/${deviceId}/services/dhcpv6-relay`);
+}
+
+export function fetchBroadcastRelay(deviceId: string): Promise<BroadcastRelayId[]> {
+  return request(`/routers/${deviceId}/services/broadcast-relay`);
+}
+
+export function fetchConfigSync(deviceId: string): Promise<ConfigSyncConfig> {
+  return request(`/routers/${deviceId}/services/config-sync`);
+}
+
+export function fetchConntrackSync(deviceId: string): Promise<ConntrackSyncConfig> {
+  return request(`/routers/${deviceId}/services/conntrack-sync`);
+}
+
+export function fetchConsoleServer(deviceId: string): Promise<ConsoleServerDevice[]> {
+  return request(`/routers/${deviceId}/services/console-server`);
+}
+
+export function fetchDnsForwarding(deviceId: string): Promise<DnsForwardingConfig> {
+  return request(`/routers/${deviceId}/services/dns-forwarding`);
+}
+
+export function fetchDynamicDns(deviceId: string): Promise<DynamicDnsEntry[]> {
+  return request(`/routers/${deviceId}/services/dynamic-dns`);
+}
+
+export function fetchEventHandler(deviceId: string): Promise<EventHandlerEntry[]> {
+  return request(`/routers/${deviceId}/services/event-handler`);
+}
+
+export function fetchHttps(deviceId: string): Promise<HttpsConfig> {
+  return request(`/routers/${deviceId}/services/https`);
+}
+
+export function fetchIpoeServer(deviceId: string): Promise<IpoeServerConfig> {
+  return request(`/routers/${deviceId}/services/ipoe-server`);
+}
+
+export function fetchLldp(deviceId: string): Promise<LldpConfig> {
+  return request(`/routers/${deviceId}/services/lldp`);
+}
+
+export function fetchMdnsRepeater(deviceId: string): Promise<MdnsRepeaterConfig> {
+  return request(`/routers/${deviceId}/services/mdns-repeater`);
+}
+
+export function fetchMonitoring(deviceId: string): Promise<MonitoringConfig> {
+  return request(`/routers/${deviceId}/services/monitoring`);
+}
+
+export function fetchNtp(deviceId: string): Promise<NtpConfig> {
+  return request(`/routers/${deviceId}/services/ntp`);
+}
+
+export function fetchPppoeServer(deviceId: string): Promise<PppoeServerConfig> {
+  return request(`/routers/${deviceId}/services/pppoe-server`);
+}
+
+export function fetchRouterAdvert(deviceId: string): Promise<RouterAdvertInterface[]> {
+  return request(`/routers/${deviceId}/services/router-advert`);
+}
+
+export function fetchSaltMinion(deviceId: string): Promise<SaltMinionConfig> {
+  return request(`/routers/${deviceId}/services/salt-minion`);
+}
+
+export function fetchSnmp(deviceId: string): Promise<SnmpConfig> {
+  return request(`/routers/${deviceId}/services/snmp`);
+}
+
+export function fetchSsh(deviceId: string): Promise<SshConfig> {
+  return request(`/routers/${deviceId}/services/ssh`);
+}
+
+export function fetchTftpServer(deviceId: string): Promise<TftpServerConfig> {
+  return request(`/routers/${deviceId}/services/tftp-server`);
+}
+
+export function fetchWebProxy(deviceId: string): Promise<WebProxyConfig> {
+  return request(`/routers/${deviceId}/services/web-proxy`);
 }
 
 // ── System config ────────────────────────────────────────────────────────────

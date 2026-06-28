@@ -1,6 +1,6 @@
 "use client";
 
-import { Gauge, Settings, Search, LogOut, Network, Route, ArrowLeftRight, Shield, Server, LucideIcon, Building2, ArrowLeft, ChevronDown, ChevronRight, Cable, Tags } from "lucide-react";
+import { Gauge, Settings, Search, LogOut, Network, Route, ArrowLeftRight, Shield, Server, LucideIcon, Building2, ArrowLeft, ChevronDown, ChevronRight, Cable, Tags, Combine, Waypoints, Box, Globe, Spline, Repeat, ShieldCheck, KeyRound, ShieldHalf, Plug, Layers, LockKeyhole, Cylinder, EthernetPort, GitFork, Boxes, Wifi, RadioTower, Router, Share2, Forward, ServerCog, FolderSync, Workflow, Terminal, RefreshCw, Zap, Lock, Radar, Cast, Activity, Clock, PlugZap, Megaphone, Bot, BarChart3, SquareTerminal, FileDown, Radio, Shuffle } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -61,14 +61,63 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
       icon: Network,
       href: `${basePath}/interfaces`,
       children: [
+        { id: "bonding",  label: "Bonding",  href: `${basePath}/interfaces/bonding`,  icon: Combine },
+        { id: "bridge",   label: "Bridge",   href: `${basePath}/interfaces/bridge`,   icon: Waypoints },
+        { id: "dummy",    label: "Dummy",    href: `${basePath}/interfaces/dummy`,    icon: Box },
         { id: "ethernet", label: "Ethernet", href: `${basePath}/interfaces/ethernet`, icon: Cable },
+        { id: "geneve",   label: "Geneve",   href: `${basePath}/interfaces/geneve`,   icon: Globe },
+        { id: "l2tpv3",   label: "L2TPv3",   href: `${basePath}/interfaces/l2tpv3`,   icon: Spline },
+        { id: "loopback", label: "Loopback", href: `${basePath}/interfaces/loopback`, icon: Repeat },
+        { id: "macsec",   label: "MACsec",   href: `${basePath}/interfaces/macsec`,   icon: ShieldCheck },
+        { id: "openvpn",  label: "OpenVPN",  href: `${basePath}/interfaces/openvpn`,  icon: KeyRound },
+        { id: "wireguard",label: "WireGuard",href: `${basePath}/interfaces/wireguard`,icon: ShieldHalf },
+        { id: "pppoe",    label: "PPPoE",    href: `${basePath}/interfaces/pppoe`,    icon: Plug },
+        { id: "macvlan",  label: "MACvLAN",  href: `${basePath}/interfaces/macvlan`,  icon: Layers },
+        { id: "sstpc",    label: "SSTP Client", href: `${basePath}/interfaces/sstpc`, icon: LockKeyhole },
+        { id: "tunnel",   label: "Tunnel",   href: `${basePath}/interfaces/tunnel`,   icon: Cylinder },
+        { id: "veth",     label: "Virtual Ethernet", href: `${basePath}/interfaces/veth`, icon: EthernetPort },
+        { id: "vti",      label: "VTI",      href: `${basePath}/interfaces/vti`,      icon: GitFork },
+        { id: "vxlan",    label: "VXLAN",    href: `${basePath}/interfaces/vxlan`,    icon: Boxes },
+        { id: "wlan",     label: "WLAN",     href: `${basePath}/interfaces/wlan`,     icon: Wifi },
+        { id: "wwan",     label: "WWAN",     href: `${basePath}/interfaces/wwan`,     icon: RadioTower },
         { id: "vlan",     label: "VLAN",     href: `${basePath}/interfaces/vlan`,     icon: Tags },
       ],
     },
     { id: "routing",     label: "Routing",    icon: Route,           href: `${basePath}/routing` },
     { id: "nat",         label: "NAT",        icon: ArrowLeftRight,  href: `${basePath}/nat` },
     { id: "firewall",    label: "Firewall",   icon: Shield,          href: `${basePath}/firewall` },
-    { id: "services",    label: "Services",   icon: Server,          href: `${basePath}/services` },
+    {
+      id: "services",
+      label: "Services",
+      icon: Server,
+      href: `${basePath}/services`,
+      children: [
+        { id: "config-sync",     label: "Config Sync",           href: `${basePath}/services/config-sync`,     icon: FolderSync },
+        { id: "conntrack-sync",  label: "Conntrack Sync",        href: `${basePath}/services/conntrack-sync`,  icon: Workflow },
+        { id: "console-server",  label: "Console Server",        href: `${basePath}/services/console-server`,  icon: Terminal },
+        { id: "dhcp-relay",      label: "DHCP Relay",            href: `${basePath}/services/dhcp-relay`,      icon: Share2 },
+        { id: "dhcp-server",     label: "DHCP Servers",          href: `${basePath}/services/dhcp-server`,     icon: Router },
+        { id: "dhcpv6-relay",    label: "DHCPv6 Relay",          href: `${basePath}/services/dhcpv6-relay`,    icon: Forward },
+        { id: "dhcpv6-server",   label: "DHCPv6 Servers",        href: `${basePath}/services/dhcpv6-server`,   icon: ServerCog },
+        { id: "dns-forwarding",  label: "DNS Forwarding",        href: `${basePath}/services/dns-forwarding`,  icon: Globe },
+        { id: "dynamic-dns",     label: "Dynamic DNS",           href: `${basePath}/services/dynamic-dns`,     icon: RefreshCw },
+        { id: "event-handler",   label: "Event Handler",         href: `${basePath}/services/event-handler`,   icon: Zap },
+        { id: "https",           label: "HTTPS API",             href: `${basePath}/services/https`,           icon: Lock },
+        { id: "ipoe-server",     label: "IPoE Server",           href: `${basePath}/services/ipoe-server`,     icon: Network },
+        { id: "lldp",            label: "LLDP",                  href: `${basePath}/services/lldp`,            icon: Radar },
+        { id: "mdns-repeater",   label: "mDNS Repeater",         href: `${basePath}/services/mdns-repeater`,   icon: Cast },
+        { id: "monitoring",      label: "Monitoring",            href: `${basePath}/services/monitoring`,      icon: Activity },
+        { id: "ntp",             label: "NTP",                   href: `${basePath}/services/ntp`,             icon: Clock },
+        { id: "pppoe-server",    label: "PPPoE Server",          href: `${basePath}/services/pppoe-server`,    icon: PlugZap },
+        { id: "router-advert",   label: "Router Advertisements", href: `${basePath}/services/router-advert`,   icon: Megaphone },
+        { id: "salt-minion",     label: "Salt Minion",           href: `${basePath}/services/salt-minion`,     icon: Bot },
+        { id: "snmp",            label: "SNMP",                  href: `${basePath}/services/snmp`,            icon: BarChart3 },
+        { id: "ssh",             label: "SSH",                   href: `${basePath}/services/ssh`,             icon: SquareTerminal },
+        { id: "tftp-server",     label: "TFTP Server",           href: `${basePath}/services/tftp-server`,     icon: FileDown },
+        { id: "broadcast-relay", label: "UDP Broadcast Relay",   href: `${basePath}/services/broadcast-relay`, icon: Radio },
+        { id: "web-proxy",       label: "Web Proxy",             href: `${basePath}/services/web-proxy`,       icon: Shuffle },
+      ],
+    },
     { id: "system",      label: "System",     icon: Settings,        href: `${basePath}/system` },
   ];
 
@@ -128,7 +177,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
       </div>
 
       {/* Nav */}
-      <div className="flex-1 overflow-auto px-3 flex flex-col gap-[2px] pt-1">
+      <div className="flex-1 min-h-0 overflow-auto px-3 flex flex-col gap-[2px] pt-1">
         {items.map((item) => {
           const Icon = item.icon;
           const itemClass = (active: boolean) =>

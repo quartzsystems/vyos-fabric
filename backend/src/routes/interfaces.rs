@@ -8,7 +8,12 @@ use uuid::Uuid;
 use crate::{
     auth::{AuthUser, Claims},
     error::{AppError, Result},
-    models::{EthernetInterface, VlanInterface},
+    models::{
+        BondingInterface, BridgeInterface, DummyInterface, EthernetInterface, GeneveInterface,
+        L2tpv3Interface, LoopbackInterface, MacsecInterface, MacvlanInterface, OpenvpnInterface,
+        PppoeInterface, SstpcInterface, TunnelInterface, VethInterface, VlanInterface,
+        VtiInterface, VxlanInterface, WireguardInterface, WlanInterface, WwanInterface,
+    },
     state::AppState,
 };
 
@@ -18,6 +23,24 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/{id}/interfaces/ethernet", get(list_ethernet))
         .route("/{id}/interfaces/vlan", get(list_vlan))
+        .route("/{id}/interfaces/bonding", get(list_bonding))
+        .route("/{id}/interfaces/bridge", get(list_bridge))
+        .route("/{id}/interfaces/dummy", get(list_dummy))
+        .route("/{id}/interfaces/geneve", get(list_geneve))
+        .route("/{id}/interfaces/l2tpv3", get(list_l2tpv3))
+        .route("/{id}/interfaces/loopback", get(list_loopback))
+        .route("/{id}/interfaces/macsec", get(list_macsec))
+        .route("/{id}/interfaces/openvpn", get(list_openvpn))
+        .route("/{id}/interfaces/wireguard", get(list_wireguard))
+        .route("/{id}/interfaces/pppoe", get(list_pppoe))
+        .route("/{id}/interfaces/macvlan", get(list_macvlan))
+        .route("/{id}/interfaces/sstpc", get(list_sstpc))
+        .route("/{id}/interfaces/tunnel", get(list_tunnel))
+        .route("/{id}/interfaces/veth", get(list_veth))
+        .route("/{id}/interfaces/vti", get(list_vti))
+        .route("/{id}/interfaces/vxlan", get(list_vxlan))
+        .route("/{id}/interfaces/wlan", get(list_wlan))
+        .route("/{id}/interfaces/wwan", get(list_wwan))
 }
 
 // ── parse helpers ──────────────────────────────────────────────────────────────
@@ -55,13 +78,27 @@ fn is_enabled(v: &Value) -> bool {
     v.get("disable").is_none()
 }
 
-/// Returns the `ethernet` config map (keyed by interface name, e.g. `eth0`).
+/// Reads `<parent> <child>` as a trimmed non-empty string (e.g. `authentication username`).
+fn nested_str(v: &Value, parent: &str, child: &str) -> Option<String> {
+    v.get(parent).and_then(|p| child_str(p, child))
+}
+
+/// Bonding/bridge members live under `member interface <name>` (1.4+).
+fn members(v: &Value) -> Vec<String> {
+    let mut m: Vec<String> = v["member"]["interface"]
+        .as_object()
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+    m.sort();
+    m
+}
+
+/// Returns the config map for one interface type (keyed by interface name, e.g. `eth0`).
 ///
-/// We query the parent `["interfaces"]` node and read its `ethernet` child — the same
-/// pattern that works for the System page (`["system"]` → `host-name`). Querying the tag
-/// node directly (`["interfaces","ethernet"]`) gets wrapped as `{"ethernet": {...}}` on some
-/// VyOS versions, which is why a single bogus "ethernet" row showed up.
-async fn ethernet_config(state: &AppState, claims: &Claims, id: Uuid) -> Result<Value> {
+/// We query the parent `["interfaces"]` node and read its `<kind>` child — the same pattern
+/// that works for the System page (`["system"]` → `host-name`). Querying the tag node directly
+/// (`["interfaces","ethernet"]`) gets wrapped as `{"ethernet": {...}}` on some VyOS versions.
+async fn interface_config(state: &AppState, claims: &Claims, id: Uuid, kind: &str) -> Result<Value> {
     let client = fetch_client(state, claims, id).await?;
     let resp = client
         .show_config(&["interfaces"])
@@ -69,7 +106,7 @@ async fn ethernet_config(state: &AppState, claims: &Claims, id: Uuid) -> Result<
         .map_err(gateway_err)?;
 
     if resp["success"].as_bool() == Some(true) {
-        return Ok(resp["data"]["ethernet"].clone());
+        return Ok(resp["data"][kind].clone());
     }
 
     let err = resp["error"].as_str().unwrap_or_default();
@@ -92,7 +129,7 @@ async fn list_ethernet(
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<EthernetInterface>>> {
-    let data = ethernet_config(&state, &claims, id).await?;
+    let data = interface_config(&state, &claims, id, "ethernet").await?;
 
     let mut out: Vec<EthernetInterface> = data
         .as_object()
@@ -122,7 +159,7 @@ async fn list_vlan(
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<VlanInterface>>> {
-    let data = ethernet_config(&state, &claims, id).await?;
+    let data = interface_config(&state, &claims, id, "ethernet").await?;
 
     let mut out: Vec<VlanInterface> = Vec::new();
     if let Some(eths) = data.as_object() {
@@ -141,6 +178,512 @@ async fn list_vlan(
             }
         }
     }
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_bonding(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<BondingInterface>>> {
+    let data = interface_config(&state, &claims, id, "bonding").await?;
+
+    let mut out: Vec<BondingInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| BondingInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    mode: child_str(cfg, "mode"),
+                    members: members(cfg),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_dummy(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<DummyInterface>>> {
+    let data = interface_config(&state, &claims, id, "dummy").await?;
+
+    let mut out: Vec<DummyInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| DummyInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_geneve(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<GeneveInterface>>> {
+    let data = interface_config(&state, &claims, id, "geneve").await?;
+
+    let mut out: Vec<GeneveInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| GeneveInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    vni: child_str(cfg, "vni"),
+                    remote: child_str(cfg, "remote"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_l2tpv3(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<L2tpv3Interface>>> {
+    let data = interface_config(&state, &claims, id, "l2tpv3").await?;
+
+    let mut out: Vec<L2tpv3Interface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| L2tpv3Interface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    source_address: child_str(cfg, "source-address"),
+                    remote: child_str(cfg, "remote"),
+                    tunnel_id: child_str(cfg, "tunnel-id"),
+                    peer_tunnel_id: child_str(cfg, "peer-tunnel-id"),
+                    session_id: child_str(cfg, "session-id"),
+                    peer_session_id: child_str(cfg, "peer-session-id"),
+                    encapsulation: child_str(cfg, "encapsulation"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_bridge(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<BridgeInterface>>> {
+    let data = interface_config(&state, &claims, id, "bridge").await?;
+
+    let mut out: Vec<BridgeInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| BridgeInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    members: members(cfg),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_loopback(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<LoopbackInterface>>> {
+    let data = interface_config(&state, &claims, id, "loopback").await?;
+
+    let mut out: Vec<LoopbackInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| LoopbackInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_macsec(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<MacsecInterface>>> {
+    let data = interface_config(&state, &claims, id, "macsec").await?;
+
+    let mut out: Vec<MacsecInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| MacsecInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    source_interface: child_str(cfg, "source-interface"),
+                    cipher: nested_str(cfg, "security", "cipher"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_openvpn(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<OpenvpnInterface>>> {
+    let data = interface_config(&state, &claims, id, "openvpn").await?;
+
+    let mut out: Vec<OpenvpnInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| OpenvpnInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    mode: child_str(cfg, "mode"),
+                    protocol: child_str(cfg, "protocol"),
+                    local_host: child_str(cfg, "local-host"),
+                    remote_host: child_str(cfg, "remote-host"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_wireguard(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<WireguardInterface>>> {
+    let data = interface_config(&state, &claims, id, "wireguard").await?;
+
+    let mut out: Vec<WireguardInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| WireguardInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    port: child_str(cfg, "port"),
+                    peer_count: cfg["peer"].as_object().map(|o| o.len() as i32).unwrap_or(0),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_pppoe(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<PppoeInterface>>> {
+    let data = interface_config(&state, &claims, id, "pppoe").await?;
+
+    let mut out: Vec<PppoeInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| PppoeInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    source_interface: child_str(cfg, "source-interface"),
+                    username: nested_str(cfg, "authentication", "username"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_macvlan(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<MacvlanInterface>>> {
+    let data = interface_config(&state, &claims, id, "pseudo-ethernet").await?;
+
+    let mut out: Vec<MacvlanInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| MacvlanInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    source_interface: child_str(cfg, "source-interface"),
+                    mode: child_str(cfg, "mode"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_sstpc(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<SstpcInterface>>> {
+    let data = interface_config(&state, &claims, id, "sstpc").await?;
+
+    let mut out: Vec<SstpcInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| SstpcInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    server: child_str(cfg, "server"),
+                    username: nested_str(cfg, "authentication", "username"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_tunnel(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<TunnelInterface>>> {
+    let data = interface_config(&state, &claims, id, "tunnel").await?;
+
+    let mut out: Vec<TunnelInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| TunnelInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    encapsulation: child_str(cfg, "encapsulation"),
+                    source_address: child_str(cfg, "source-address"),
+                    remote: child_str(cfg, "remote"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_veth(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<VethInterface>>> {
+    let data = interface_config(&state, &claims, id, "virtual-ethernet").await?;
+
+    let mut out: Vec<VethInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| VethInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    peer_name: child_str(cfg, "peer-name"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_vti(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<VtiInterface>>> {
+    let data = interface_config(&state, &claims, id, "vti").await?;
+
+    let mut out: Vec<VtiInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| VtiInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_vxlan(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<VxlanInterface>>> {
+    let data = interface_config(&state, &claims, id, "vxlan").await?;
+
+    let mut out: Vec<VxlanInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| VxlanInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    vni: child_str(cfg, "vni"),
+                    remote: child_str(cfg, "remote"),
+                    source_address: child_str(cfg, "source-address"),
+                    port: child_str(cfg, "port"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_wlan(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<WlanInterface>>> {
+    let data = interface_config(&state, &claims, id, "wireless").await?;
+
+    let mut out: Vec<WlanInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| WlanInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    interface_type: child_str(cfg, "type"),
+                    ssid: child_str(cfg, "ssid"),
+                    channel: child_str(cfg, "channel"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
+}
+
+async fn list_wwan(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<WwanInterface>>> {
+    let data = interface_config(&state, &claims, id, "wwan").await?;
+
+    let mut out: Vec<WwanInterface> = data
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, cfg)| WwanInterface {
+                    name: name.clone(),
+                    description: child_str(cfg, "description"),
+                    addresses: as_addresses(cfg),
+                    mtu: as_mtu(cfg),
+                    apn: child_str(cfg, "apn"),
+                    enabled: is_enabled(cfg),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(Json(out))

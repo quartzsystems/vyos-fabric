@@ -30,7 +30,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="h-screen overflow-hidden"
-      style={{ display: "grid", gridTemplateColumns: "240px 1fr" }}
+      style={{ display: "grid", gridTemplateColumns: "240px 1fr", gridTemplateRows: "minmax(0, 1fr)" }}
     >
       <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
       <main className="overflow-auto" style={{ background: "var(--qz-bg)" }}>

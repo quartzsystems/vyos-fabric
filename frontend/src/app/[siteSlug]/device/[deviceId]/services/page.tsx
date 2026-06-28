@@ -1,12 +1,10 @@
-export default function ServicesPage() {
-  return (
-    <div className="p-[28px_36px]">
-      <h1
-        className="text-[28px] font-bold text-[var(--qz-fg-1)] m-0"
-        style={{ letterSpacing: "-0.015em" }}
-      >
-        Services
-      </h1>
-    </div>
-  );
+import { redirect } from "next/navigation";
+
+export default async function ServicesIndex({
+  params,
+}: {
+  params: Promise<{ siteSlug: string; deviceId: string }>;
+}) {
+  const { siteSlug, deviceId } = await params;
+  redirect(`/${siteSlug}/device/${deviceId}/services/dhcp-server`);
 }
