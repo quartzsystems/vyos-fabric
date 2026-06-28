@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Plus, RotateCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Pencil, Plus, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Column, DataTable, FilterDef } from "@/components/dashboard/DataTable";
-import { RowActions } from "@/components/dashboard/RowActions";
-import { EthernetInterface, fetchEthernet } from "@/lib/api";
+import { EthernetInterface, fetchEthernet, fetchPhysicalEthernet } from "@/lib/api";
 import { useDevice } from "@/lib/DeviceContext";
+import { EthernetFormModal } from "./EthernetFormModal";
 
 function StatePill({ enabled }: { enabled: boolean }) {
   return <span className={enabled ? "badge badge-ok" : "badge badge-muted"}>{enabled ? "Enabled" : "Disabled"}</span>;
@@ -50,23 +50,39 @@ const filters: FilterDef<EthernetInterface>[] = [
 export default function EthernetPage() {
   const { deviceId, device } = useDevice();
   const [rows, setRows] = useState<EthernetInterface[]>([]);
+  const [physical, setPhysical] = useState<string[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  // null = closed; { eth: undefined } = add; { eth } = edit.
+  const [modal, setModal] = useState<{ eth?: EthernetInterface } | null>(null);
+
+  const fetchData = useCallback(async () => {
+    const [eths, phys] = await Promise.all([fetchEthernet(deviceId), fetchPhysicalEthernet(deviceId)]);
+    setRows(eths);
+    setPhysical(phys);
+  }, [deviceId]);
+
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
-      setRows(await fetchEthernet(deviceId));
+      await fetchData();
       setStatus("ready");
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "Failed to load interfaces.");
       setStatus("error");
     }
-  }, [deviceId]);
+  }, [fetchData]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Physical NICs that have no configured interface yet — the only ones addable.
+  const freeNames = useMemo(
+    () => physical.filter((p) => !rows.some((r) => r.name === p)),
+    [physical, rows],
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -102,11 +118,44 @@ export default function EthernetPage() {
             rowId={(r) => r.name}
             searchPlaceholder="Search interfaces…"
             emptyMessage="No ethernet interfaces configured."
-            toolbar={<Button kind="primary" size="sm" icon={Plus}>Create interface</Button>}
-            actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
+            toolbar={
+              <span title={freeNames.length === 0 ? "No free physical interfaces available" : undefined}>
+                <Button
+                  kind="primary"
+                  size="sm"
+                  icon={Plus}
+                  onClick={() => setModal({})}
+                  disabled={freeNames.length === 0}
+                >
+                  Add interface
+                </Button>
+              </span>
+            }
+            actions={(row) => (
+              <div className="inline-flex items-center justify-end">
+                <button
+                  type="button"
+                  title={`Edit ${row.name}`}
+                  aria-label="Edit"
+                  onClick={() => setModal({ eth: row })}
+                  className="grid place-items-center w-7 h-7 rounded-md bg-transparent border-0 text-[var(--qz-fg-4)] hover:text-[var(--qz-accent)] hover:bg-[color-mix(in_oklab,white_5%,transparent)] transition-colors cursor-pointer"
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
+            )}
           />
         )}
       </div>
+
+      {modal && (
+        <EthernetFormModal
+          initial={modal.eth}
+          freeNames={freeNames}
+          onClose={() => setModal(null)}
+        />
+      )}
     </div>
   );
 }

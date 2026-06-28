@@ -51,8 +51,8 @@ export default function DummyPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchDummy(deviceId));
       setStatus("ready");
@@ -100,6 +100,7 @@ export default function DummyPage() {
             emptyMessage="No dummy interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create dummy</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>

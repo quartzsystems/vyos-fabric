@@ -172,24 +172,34 @@ async fn stage_system(
     .execute(&state.db)
     .await?;
 
+    let inserted = insert_changes(&state.db, id, changes).await?;
+    Ok(Json(inserted))
+}
+
+/// Persist a list of staged changes and return the inserted rows (with ids/timestamps).
+/// Shared by the typed staging endpoints (system, interfaces, …).
+pub(super) async fn insert_changes(
+    db: &sqlx::PgPool,
+    router_id: Uuid,
+    changes: Vec<NewConfigChange>,
+) -> Result<Vec<ConfigChange>> {
     let mut inserted = Vec::with_capacity(changes.len());
     for c in changes {
         let row = sqlx::query_as::<_, ConfigChange>(&format!(
             "INSERT INTO config_changes (router_id, op, path, summary, section, created_by)
              VALUES ($1, $2, $3, $4, $5, $6) RETURNING {CHANGE_COLS}"
         ))
-        .bind(id)
+        .bind(router_id)
         .bind(&c.op)
         .bind(&c.path)
         .bind(&c.summary)
         .bind(&c.section)
         .bind(c.created_by)
-        .fetch_one(&state.db)
+        .fetch_one(db)
         .await?;
         inserted.push(row);
     }
-
-    Ok(Json(inserted))
+    Ok(inserted)
 }
 
 /// Compute the minimal set/delete command list to turn `live` into the desired `update`.

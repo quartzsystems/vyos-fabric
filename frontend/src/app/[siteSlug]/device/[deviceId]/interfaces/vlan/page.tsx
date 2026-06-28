@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Plus, RotateCw } from "lucide-react";
+import { AlertTriangle, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Column, DataTable, FilterDef } from "@/components/dashboard/DataTable";
-import { RowActions } from "@/components/dashboard/RowActions";
-import { VlanInterface, fetchVlans } from "@/lib/api";
+import { fetchEthernet, fetchVlans, VlanInterface } from "@/lib/api";
+import { useConfigChanges } from "@/lib/ConfigChanges";
 import { useDevice } from "@/lib/DeviceContext";
+import { VlanFormModal } from "./VlanFormModal";
 
 function StatePill({ enabled }: { enabled: boolean }) {
   return <span className={enabled ? "badge badge-ok" : "badge badge-muted"}>{enabled ? "Enabled" : "Disabled"}</span>;
@@ -35,22 +36,106 @@ const columns: Column<VlanInterface>[] = [
   },
 ];
 
+/// Per-row edit/delete. Delete asks for inline confirmation before staging.
+function VlanRowActions({ row, onEdit, onDelete }: { row: VlanInterface; onEdit: () => void; onDelete: () => Promise<unknown> }) {
+  const [confirming, setConfirming] = useState(false);
+  const [working, setWorking] = useState(false);
+
+  return (
+    <div className="inline-flex items-center gap-1 justify-end">
+      {confirming ? (
+        <>
+          <button
+            type="button"
+            disabled={working}
+            onClick={async () => {
+              setWorking(true);
+              try {
+                await onDelete();
+              } finally {
+                setWorking(false);
+                setConfirming(false);
+              }
+            }}
+            className="text-[12px] font-semibold px-[10px] py-[5px] rounded cursor-pointer border-0 disabled:opacity-60"
+            style={{ background: "var(--qz-danger)", color: "white" }}
+          >
+            {working ? "…" : "Confirm"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            className="text-[12px] px-[10px] py-[5px] rounded cursor-pointer"
+            style={{ background: "transparent", border: "1px solid var(--qz-border)", color: "var(--qz-fg-3)" }}
+          >
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            title={`Edit ${row.name}`}
+            aria-label="Edit"
+            onClick={onEdit}
+            className="grid place-items-center w-7 h-7 rounded-md bg-transparent border-0 text-[var(--qz-fg-4)] hover:text-[var(--qz-accent)] hover:bg-[color-mix(in_oklab,white_5%,transparent)] transition-colors cursor-pointer"
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            type="button"
+            title={`Delete ${row.name}`}
+            aria-label="Delete"
+            onClick={() => setConfirming(true)}
+            className="grid place-items-center w-7 h-7 rounded-md bg-transparent border-0 text-[var(--qz-fg-4)] hover:text-[var(--qz-danger)] hover:bg-[color-mix(in_oklab,white_5%,transparent)] transition-colors cursor-pointer"
+          >
+            <Trash2 size={14} />
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function VlanPage() {
   const { deviceId, device } = useDevice();
+  const { removeVlan } = useConfigChanges();
   const [rows, setRows] = useState<VlanInterface[]>([]);
+  const [parents, setParents] = useState<string[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
+  // null = closed; { vlan: undefined } = create; { vlan } = edit.
+  const [modal, setModal] = useState<{ vlan?: VlanInterface } | null>(null);
+
+  const fetchData = useCallback(async () => {
+    const [vlans, eths] = await Promise.all([fetchVlans(deviceId), fetchEthernet(deviceId)]);
+    setRows(vlans);
+    setParents(eths.map((e) => e.name).sort());
+  }, [deviceId]);
+
+  // Initial / error-retry load: shows the full-page loading state.
   const load = useCallback(async () => {
     setStatus("loading");
     try {
-      setRows(await fetchVlans(deviceId));
+      await fetchData();
       setStatus("ready");
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "Failed to load VLAN interfaces.");
       setStatus("error");
     }
-  }, [deviceId]);
+  }, [fetchData]);
+
+  // Toolbar refresh: re-fetches in place, keeping the current table visible.
+  const refresh = useCallback(async () => {
+    try {
+      await fetchData();
+      setStatus("ready");
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "Failed to load VLAN interfaces.");
+      setStatus("error");
+    }
+  }, [fetchData]);
 
   useEffect(() => {
     load();
@@ -58,7 +143,7 @@ export default function VlanPage() {
 
   // Parent filter options are derived from the data.
   const filters: FilterDef<VlanInterface>[] = useMemo(() => {
-    const parents = Array.from(new Set(rows.map((r) => r.parent))).sort();
+    const fromRows = Array.from(new Set(rows.map((r) => r.parent)));
     return [
       {
         key: "status",
@@ -72,7 +157,7 @@ export default function VlanPage() {
       {
         key: "parent",
         label: "Parent",
-        options: parents.map((p) => ({ value: p, label: p })),
+        options: fromRows.sort().map((p) => ({ value: p, label: p })),
         predicate: (r, v) => r.parent === v,
       },
     ];
@@ -112,11 +197,31 @@ export default function VlanPage() {
             rowId={(r) => r.name}
             searchPlaceholder="Search VLANs…"
             emptyMessage="No VLAN interfaces configured."
-            toolbar={<Button kind="primary" size="sm" icon={Plus}>Create VLAN</Button>}
-            actions={() => <RowActions />}
+            onRefresh={refresh}
+            toolbar={
+              <Button kind="primary" size="sm" icon={Plus} onClick={() => setModal({})}>
+                Create VLAN
+              </Button>
+            }
+            actions={(row) => (
+              <VlanRowActions
+                row={row}
+                onEdit={() => setModal({ vlan: row })}
+                onDelete={() => removeVlan(row.parent, row.vlan_id)}
+              />
+            )}
           />
         )}
       </div>
+
+      {modal && (
+        <VlanFormModal
+          initial={modal.vlan}
+          parents={parents}
+          existing={rows}
+          onClose={() => setModal(null)}
+        />
+      )}
     </div>
   );
 }

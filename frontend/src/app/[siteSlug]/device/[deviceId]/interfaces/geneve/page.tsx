@@ -67,8 +67,8 @@ export default function GenevePage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchGeneve(deviceId));
       setStatus("ready");
@@ -116,6 +116,7 @@ export default function GenevePage() {
             emptyMessage="No GENEVE interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create GENEVE</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>

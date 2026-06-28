@@ -707,8 +707,59 @@ export function fetchEthernet(deviceId: string): Promise<EthernetInterface[]> {
   return request(`/routers/${deviceId}/interfaces/ethernet`);
 }
 
+/// All physical ethernet NICs present on the device (configured or not). The UI subtracts
+/// already-configured interfaces from this to find which NICs are free to add.
+export function fetchPhysicalEthernet(deviceId: string): Promise<string[]> {
+  return request(`/routers/${deviceId}/interfaces/ethernet/physical`);
+}
+
+/// Desired physical ethernet config. `speed`/`duplex` are null for auto (the default).
+export interface EthernetConfigUpdate {
+  name: string;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  speed: string | null;
+  duplex: string | null;
+  enabled: boolean;
+}
+
+export function stageEthernet(deviceId: string, body: EthernetConfigUpdate): Promise<ConfigChange[]> {
+  return request(`/routers/${deviceId}/interfaces/ethernet/stage`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export function fetchVlans(deviceId: string): Promise<VlanInterface[]> {
   return request(`/routers/${deviceId}/interfaces/vlan`);
+}
+
+/// Desired VLAN sub-interface config sent to the staging endpoint. `original_*` carry
+/// the edited row's identity so a changed parent/id is staged as delete-old + create-new.
+export interface VlanConfigUpdate {
+  parent: string;
+  vlan_id: number;
+  description: string | null;
+  addresses: string[];
+  mtu: number | null;
+  enabled: boolean;
+  original_parent?: string | null;
+  original_vlan_id?: number | null;
+}
+
+export function stageVlan(deviceId: string, body: VlanConfigUpdate): Promise<ConfigChange[]> {
+  return request(`/routers/${deviceId}/interfaces/vlan/stage`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteVlan(deviceId: string, parent: string, vlanId: number): Promise<ConfigChange[]> {
+  return request(`/routers/${deviceId}/interfaces/vlan/delete`, {
+    method: "POST",
+    body: JSON.stringify({ parent, vlan_id: vlanId }),
+  });
 }
 
 export function fetchBonding(deviceId: string): Promise<BondingInterface[]> {

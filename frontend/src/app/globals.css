@@ -113,6 +113,8 @@ body {
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Render native controls (number-input spinners, scrollbars, etc.) in dark mode. */
+  color-scheme: dark;
 }
 
 /* --- Surface utility --- */

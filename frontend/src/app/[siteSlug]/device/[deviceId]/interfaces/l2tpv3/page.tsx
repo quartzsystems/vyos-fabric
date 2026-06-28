@@ -75,8 +75,8 @@ export default function L2tpv3Page() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchL2tpv3(deviceId));
       setStatus("ready");
@@ -124,6 +124,7 @@ export default function L2tpv3Page() {
             emptyMessage="No L2TPv3 interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create L2TPv3</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>

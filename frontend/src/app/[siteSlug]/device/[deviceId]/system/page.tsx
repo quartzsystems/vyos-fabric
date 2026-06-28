@@ -107,6 +107,7 @@ function GeneralTab() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Editable desired state.
   const [hostname, setHostname] = useState("");
@@ -118,8 +119,8 @@ function GeneralTab() {
   // Live device clock (read-only).
   const [deviceTime, setDeviceTime] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       const cfg = await fetchSystem(deviceId);
       setHostname(cfg.hostname ?? "");
@@ -197,8 +198,22 @@ function GeneralTab() {
     );
   }
 
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await load("refresh");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <div className="max-w-[640px] flex flex-col gap-8">
+      <div className="flex justify-end -mb-4">
+        <Button kind="secondary" size="sm" icon={RotateCw} onClick={refresh} disabled={refreshing}>
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </Button>
+      </div>
       {/* Hostname & Domain */}
       <form onSubmit={(e) => { e.preventDefault(); save(); }} className="flex flex-col gap-5">
         <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>

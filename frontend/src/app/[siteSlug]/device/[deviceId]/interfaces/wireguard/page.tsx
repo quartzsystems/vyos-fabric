@@ -68,8 +68,8 @@ export default function WireguardPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchWireguard(deviceId));
       setStatus("ready");
@@ -117,6 +117,7 @@ export default function WireguardPage() {
             emptyMessage="No WireGuard interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create WireGuard</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>

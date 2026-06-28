@@ -59,8 +59,8 @@ export default function WwanPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchWwan(deviceId));
       setStatus("ready");
@@ -108,6 +108,7 @@ export default function WwanPage() {
             emptyMessage="No WWAN interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create WWAN</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>

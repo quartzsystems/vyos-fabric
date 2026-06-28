@@ -10,11 +10,16 @@ import {
 import {
   commitChanges,
   ConfigChange,
+  deleteVlan,
   discardAllChanges,
   discardChange,
+  EthernetConfigUpdate,
   fetchChanges,
+  stageEthernet,
   stageSystem,
+  stageVlan,
   SystemUpdate,
+  VlanConfigUpdate,
 } from "./api";
 import { useDashboard } from "./DashboardContext";
 import { useDevice } from "./DeviceContext";
@@ -28,6 +33,9 @@ interface ConfigChangesState {
   setOpen: (v: boolean) => void;
   refresh: () => Promise<void>;
   stageSystemChanges: (update: SystemUpdate) => Promise<ConfigChange[]>;
+  stageVlanChanges: (update: VlanConfigUpdate) => Promise<ConfigChange[]>;
+  removeVlan: (parent: string, vlanId: number) => Promise<ConfigChange[]>;
+  stageEthernetChanges: (update: EthernetConfigUpdate) => Promise<ConfigChange[]>;
   discardOne: (changeId: string) => Promise<void>;
   discardAll: () => Promise<void>;
   commit: () => Promise<boolean>;
@@ -61,6 +69,21 @@ export function ConfigChangesProvider({ children }: { children: React.ReactNode 
     refresh();
   }, [refresh]);
 
+  // Shared post-stage handling: refresh the tray, toast a summary, open on changes.
+  const announce = useCallback(
+    async (staged: ConfigChange[], emptyMsg: string) => {
+      await refresh();
+      setToast(
+        staged.length === 0
+          ? emptyMsg
+          : `${staged.length} change${staged.length === 1 ? "" : "s"} staged — review to commit.`,
+      );
+      if (staged.length > 0) setOpen(true);
+      return staged;
+    },
+    [refresh, setToast],
+  );
+
   const stageSystemChanges = useCallback(
     async (update: SystemUpdate) => {
       if (!deviceId) {
@@ -68,16 +91,45 @@ export function ConfigChangesProvider({ children }: { children: React.ReactNode 
         return [];
       }
       const staged = await stageSystem(deviceId, update);
-      await refresh();
-      setToast(
-        staged.length === 0
-          ? "No changes — config already matches."
-          : `${staged.length} change${staged.length === 1 ? "" : "s"} staged — review to commit.`,
-      );
-      if (staged.length > 0) setOpen(true);
-      return staged;
+      return announce(staged, "No changes — config already matches.");
     },
-    [deviceId, refresh, setToast],
+    [deviceId, announce, setToast],
+  );
+
+  const stageVlanChanges = useCallback(
+    async (update: VlanConfigUpdate) => {
+      if (!deviceId) {
+        setToast("No device selected.");
+        return [];
+      }
+      const staged = await stageVlan(deviceId, update);
+      return announce(staged, "No changes — VLAN already matches.");
+    },
+    [deviceId, announce, setToast],
+  );
+
+  const removeVlan = useCallback(
+    async (parent: string, vlanId: number) => {
+      if (!deviceId) {
+        setToast("No device selected.");
+        return [];
+      }
+      const staged = await deleteVlan(deviceId, parent, vlanId);
+      return announce(staged, "Nothing to delete.");
+    },
+    [deviceId, announce, setToast],
+  );
+
+  const stageEthernetChanges = useCallback(
+    async (update: EthernetConfigUpdate) => {
+      if (!deviceId) {
+        setToast("No device selected.");
+        return [];
+      }
+      const staged = await stageEthernet(deviceId, update);
+      return announce(staged, "No changes — interface already matches.");
+    },
+    [deviceId, announce, setToast],
   );
 
   const discardOne = useCallback(
@@ -128,6 +180,9 @@ export function ConfigChangesProvider({ children }: { children: React.ReactNode 
         setOpen,
         refresh,
         stageSystemChanges,
+        stageVlanChanges,
+        removeVlan,
+        stageEthernetChanges,
         discardOne,
         discardAll,
         commit,

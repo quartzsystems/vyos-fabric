@@ -74,8 +74,8 @@ export default function VxlanPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchVxlan(deviceId));
       setStatus("ready");
@@ -123,6 +123,7 @@ export default function VxlanPage() {
             emptyMessage="No VXLAN interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create VXLAN</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>

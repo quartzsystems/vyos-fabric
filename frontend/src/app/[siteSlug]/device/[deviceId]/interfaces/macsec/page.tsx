@@ -68,8 +68,8 @@ export default function MacsecPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchMacsec(deviceId));
       setStatus("ready");
@@ -117,6 +117,7 @@ export default function MacsecPage() {
             emptyMessage="No MACsec interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create MACsec</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>

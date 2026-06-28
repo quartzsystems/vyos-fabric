@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A physical/ethernet interface read live from the device config.
 #[derive(Debug, Serialize)]
@@ -23,6 +23,44 @@ pub struct VlanInterface {
     pub description: Option<String>,
     pub addresses: Vec<String>,
     pub mtu: Option<i32>,
+    pub enabled: bool,
+}
+
+/// Desired VLAN sub-interface config from the UI. Diffed against live config to
+/// produce staged `set`/`delete` changes. `original_*` carry the row's identity
+/// when editing, so a changed parent/id is staged as delete-old + create-new.
+#[derive(Debug, Deserialize)]
+pub struct VlanConfigUpdate {
+    pub parent: String,
+    pub vlan_id: i32,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub addresses: Vec<String>,
+    pub mtu: Option<i32>,
+    pub enabled: bool,
+    pub original_parent: Option<String>,
+    pub original_vlan_id: Option<i32>,
+}
+
+/// Identity of a VLAN sub-interface to drop (`ethN vif <id>`).
+#[derive(Debug, Deserialize)]
+pub struct VlanDelete {
+    pub parent: String,
+    pub vlan_id: i32,
+}
+
+/// Desired physical ethernet config from the UI. Diffed against live config to produce
+/// staged `set`/`delete` changes. `name` is a hardware NIC (`ethN`) — it can't be created,
+/// only configured, so there's no rename. `speed`/`duplex` are `None` for auto (default).
+#[derive(Debug, Deserialize)]
+pub struct EthernetConfigUpdate {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub addresses: Vec<String>,
+    pub mtu: Option<i32>,
+    pub speed: Option<String>,
+    pub duplex: Option<String>,
     pub enabled: bool,
 }
 

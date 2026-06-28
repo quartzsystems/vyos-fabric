@@ -73,8 +73,8 @@ export default function TunnelPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchTunnel(deviceId));
       setStatus("ready");
@@ -122,6 +122,7 @@ export default function TunnelPage() {
             emptyMessage="No tunnel interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create tunnel</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>

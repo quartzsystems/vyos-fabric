@@ -1,28 +1,34 @@
 //! Live interface inventory (ethernet + VLAN sub-interfaces), read from device config.
 //! Merged into the `/routers` nest, so routes live under `/routers/{id}/interfaces/...`.
 
-use axum::{extract::{Path, State}, routing::get, Json, Router};
+use axum::{extract::{Path, State}, routing::{get, post}, Json, Router};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
-    auth::{AuthUser, Claims},
+    auth::{authorize_router, AuthUser, Claims},
     error::{AppError, Result},
     models::{
-        BondingInterface, BridgeInterface, DummyInterface, EthernetInterface, GeneveInterface,
-        L2tpv3Interface, LoopbackInterface, MacsecInterface, MacvlanInterface, OpenvpnInterface,
-        PppoeInterface, SstpcInterface, TunnelInterface, VethInterface, VlanInterface,
-        VtiInterface, VxlanInterface, WireguardInterface, WlanInterface, WwanInterface,
+        BondingInterface, BridgeInterface, ConfigChange, DummyInterface, EthernetConfigUpdate,
+        EthernetInterface, GeneveInterface, L2tpv3Interface, LoopbackInterface, MacsecInterface,
+        MacvlanInterface, NewConfigChange, OpenvpnInterface, PppoeInterface, SstpcInterface,
+        TunnelInterface, VethInterface, VlanConfigUpdate, VlanDelete, VlanInterface, VtiInterface,
+        VxlanInterface, WireguardInterface, WlanInterface, WwanInterface,
     },
     state::AppState,
 };
 
+use super::config::insert_changes;
 use super::routers::{fetch_client, gateway_err};
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/{id}/interfaces/ethernet", get(list_ethernet))
+        .route("/{id}/interfaces/ethernet/physical", get(list_physical_ethernet))
+        .route("/{id}/interfaces/ethernet/stage", post(stage_ethernet))
         .route("/{id}/interfaces/vlan", get(list_vlan))
+        .route("/{id}/interfaces/vlan/stage", post(stage_vlan))
+        .route("/{id}/interfaces/vlan/delete", post(delete_vlan))
         .route("/{id}/interfaces/bonding", get(list_bonding))
         .route("/{id}/interfaces/bridge", get(list_bridge))
         .route("/{id}/interfaces/dummy", get(list_dummy))
@@ -154,6 +160,202 @@ async fn list_ethernet(
     Ok(Json(out))
 }
 
+// ── Ethernet staging ─────────────────────────────────────────────────────────
+
+/// Parse interface names from the first column of `show interfaces ethernet` op output.
+/// The table starts after a dashed separator line; vif sub-interfaces (`eth1.20`) are skipped.
+fn parse_ethernet_names(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut in_table = false;
+    for line in text.lines() {
+        let t = line.trim_start();
+        if !in_table {
+            if t.starts_with("---") {
+                in_table = true;
+            }
+            continue;
+        }
+        let Some(tok) = t.split_whitespace().next() else { continue };
+        if tok.contains('.') {
+            continue; // vif sub-interface, not a physical NIC
+        }
+        if tok.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
+            out.push(tok.to_string());
+        }
+    }
+    out
+}
+
+/// The full set of physical ethernet NICs present on the device (configured or not),
+/// read from operational state. The UI subtracts already-configured ones to find which
+/// are free to add.
+async fn list_physical_ethernet(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<String>>> {
+    let client = fetch_client(&state, &claims, id).await?;
+    let resp = client.show(&["interfaces", "ethernet"]).await.map_err(gateway_err)?;
+    let text = resp["data"].as_str().unwrap_or_default();
+    let mut names = parse_ethernet_names(text);
+    names.sort();
+    names.dedup();
+    Ok(Json(names))
+}
+
+/// Config path of a physical ethernet node: `interfaces ethernet <name>`.
+fn eth_base(name: &str) -> Vec<String> {
+    vec!["interfaces".into(), "ethernet".into(), name.into()]
+}
+
+/// Diff a desired ethernet config against the live config into a minimal set/delete list.
+fn diff_ethernet(eth: &Value, u: &EthernetConfigUpdate, by: Uuid) -> Vec<NewConfigChange> {
+    let by = Some(by);
+    let name = &u.name;
+    let live = eth.get(name);
+    let is_new = live.is_none();
+
+    let base = eth_base(name);
+    let mk = |op: &str, suffix: &[&str], summary: String| {
+        let mut path = base.clone();
+        path.extend(suffix.iter().map(|s| s.to_string()));
+        NewConfigChange {
+            op: op.into(),
+            path,
+            summary,
+            section: "interfaces".into(),
+            created_by: by,
+        }
+    };
+
+    let mut out = Vec::new();
+    let mut created_via_set = false;
+
+    // Description.
+    let live_desc = live.and_then(|v| child_str(v, "description"));
+    let new_desc = u
+        .description
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if new_desc != live_desc {
+        if let Some(d) = &new_desc {
+            out.push(mk("set", &["description", d.as_str()], format!("{name}: description → {d}")));
+            created_via_set = true;
+        } else {
+            out.push(mk("delete", &["description"], format!("{name}: remove description")));
+        }
+    }
+
+    // Addresses (multi-value).
+    let live_addrs = live.map(as_addresses).unwrap_or_default();
+    let new_addrs: Vec<String> = u
+        .addresses
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    for a in &new_addrs {
+        if !live_addrs.contains(a) {
+            out.push(mk("set", &["address", a.as_str()], format!("{name}: add address {a}")));
+            created_via_set = true;
+        }
+    }
+    for a in &live_addrs {
+        if !new_addrs.contains(a) {
+            out.push(mk("delete", &["address", a.as_str()], format!("{name}: remove address {a}")));
+        }
+    }
+
+    // MTU.
+    let live_mtu = live.and_then(as_mtu);
+    if u.mtu != live_mtu {
+        if let Some(m) = u.mtu {
+            out.push(mk("set", &["mtu", m.to_string().as_str()], format!("{name}: MTU → {m}")));
+            created_via_set = true;
+        } else {
+            out.push(mk("delete", &["mtu"], format!("{name}: remove MTU")));
+        }
+    }
+
+    // Speed — `None`/empty means auto (the default), modelled by deleting the explicit leaf.
+    let live_speed = live.and_then(|v| child_str(v, "speed"));
+    let new_speed = u.speed.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if new_speed != live_speed {
+        if let Some(s) = &new_speed {
+            out.push(mk("set", &["speed", s.as_str()], format!("{name}: speed → {s}")));
+            created_via_set = true;
+        } else {
+            out.push(mk("delete", &["speed"], format!("{name}: speed → auto")));
+        }
+    }
+
+    // Duplex — same auto-default handling as speed.
+    let live_duplex = live.and_then(|v| child_str(v, "duplex"));
+    let new_duplex = u.duplex.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if new_duplex != live_duplex {
+        if let Some(d) = &new_duplex {
+            out.push(mk("set", &["duplex", d.as_str()], format!("{name}: duplex → {d}")));
+            created_via_set = true;
+        } else {
+            out.push(mk("delete", &["duplex"], format!("{name}: duplex → auto")));
+        }
+    }
+
+    // Enabled state — VyOS models "down" as a valueless `disable` leaf. New NICs default up.
+    let live_enabled = live.map(is_enabled).unwrap_or(true);
+    if u.enabled != live_enabled {
+        if u.enabled {
+            out.push(mk("delete", &["disable"], format!("{name}: enable")));
+        } else {
+            out.push(mk("set", &["disable"], format!("{name}: disable")));
+            created_via_set = true;
+        }
+    }
+
+    // Configuring a previously-unconfigured NIC with nothing else still needs the node created.
+    if is_new && !created_via_set {
+        out.push(NewConfigChange {
+            op: "set".into(),
+            path: base,
+            summary: format!("Configure {name}"),
+            section: "interfaces".into(),
+            created_by: by,
+        });
+    }
+
+    out
+}
+
+async fn stage_ethernet(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<EthernetConfigUpdate>,
+) -> Result<Json<Vec<ConfigChange>>> {
+    if body.name.trim().is_empty() {
+        return Err(AppError::BadRequest("interface name is required".into()));
+    }
+
+    let eth = interface_config(&state, &claims, id, "ethernet").await?;
+    let changes = diff_ethernet(&eth, &body, claims.sub);
+
+    // Replace this NIC's stale pending changes, but leave its VLAN (vif) changes alone —
+    // those are staged separately and keyed by a deeper path.
+    sqlx::query(
+        "DELETE FROM config_changes
+         WHERE router_id = $1 AND status = 'pending'
+           AND path[1:3] = $2 AND path[4] IS DISTINCT FROM 'vif'",
+    )
+    .bind(id)
+    .bind(eth_base(&body.name))
+    .execute(&state.db)
+    .await?;
+
+    let inserted = insert_changes(&state.db, id, changes).await?;
+    Ok(Json(inserted))
+}
+
 async fn list_vlan(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
@@ -181,6 +383,209 @@ async fn list_vlan(
 
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(Json(out))
+}
+
+// ── VLAN staging ─────────────────────────────────────────────────────────────
+
+/// Config path of a VLAN sub-interface node: `interfaces ethernet <parent> vif <id>`.
+fn vif_base(parent: &str, vid: i32) -> Vec<String> {
+    vec![
+        "interfaces".into(),
+        "ethernet".into(),
+        parent.into(),
+        "vif".into(),
+        vid.to_string(),
+    ]
+}
+
+/// The live config object for one vif (`None` when it doesn't exist yet).
+fn live_vif<'a>(eth: &'a Value, parent: &str, vid: i32) -> Option<&'a Value> {
+    eth.get(parent)?.get("vif")?.get(vid.to_string())
+}
+
+/// Diff a desired VLAN against the live ethernet config into a minimal set/delete list.
+fn diff_vlan(eth: &Value, update: &VlanConfigUpdate, by: Uuid) -> Vec<NewConfigChange> {
+    let by = Some(by);
+    let name = format!("{}.{}", update.parent, update.vlan_id);
+    let mut out = Vec::new();
+
+    // An edit that changes parent or id is a move: drop the old vif and rebuild fresh.
+    let moved = matches!(
+        (&update.original_parent, update.original_vlan_id),
+        (Some(op), Some(ovid)) if op != &update.parent || ovid != update.vlan_id
+    );
+    if moved {
+        let op = update.original_parent.as_deref().unwrap();
+        let ovid = update.original_vlan_id.unwrap();
+        out.push(NewConfigChange {
+            op: "delete".into(),
+            path: vif_base(op, ovid),
+            summary: format!("Delete VLAN {op}.{ovid}"),
+            section: "interfaces".into(),
+            created_by: by,
+        });
+    }
+
+    // After a move the target is brand new, so diff against an empty live config.
+    let live = if moved {
+        None
+    } else {
+        live_vif(eth, &update.parent, update.vlan_id)
+    };
+    let is_new = live.is_none();
+
+    let base = vif_base(&update.parent, update.vlan_id);
+    let mk = |op: &str, suffix: &[&str], summary: String| {
+        let mut path = base.clone();
+        path.extend(suffix.iter().map(|s| s.to_string()));
+        NewConfigChange {
+            op: op.into(),
+            path,
+            summary,
+            section: "interfaces".into(),
+            created_by: by,
+        }
+    };
+
+    // Whether we've emitted any `set` that implicitly creates the vif node.
+    let mut created_via_set = false;
+
+    // Description.
+    let live_desc = live.and_then(|v| child_str(v, "description"));
+    let new_desc = update
+        .description
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if new_desc != live_desc {
+        if let Some(d) = &new_desc {
+            out.push(mk("set", &["description", d.as_str()], format!("{name}: description → {d}")));
+            created_via_set = true;
+        } else {
+            out.push(mk("delete", &["description"], format!("{name}: remove description")));
+        }
+    }
+
+    // Addresses (multi-value).
+    let live_addrs = live.map(as_addresses).unwrap_or_default();
+    let new_addrs: Vec<String> = update
+        .addresses
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    for a in &new_addrs {
+        if !live_addrs.contains(a) {
+            out.push(mk("set", &["address", a.as_str()], format!("{name}: add address {a}")));
+            created_via_set = true;
+        }
+    }
+    for a in &live_addrs {
+        if !new_addrs.contains(a) {
+            out.push(mk("delete", &["address", a.as_str()], format!("{name}: remove address {a}")));
+        }
+    }
+
+    // MTU.
+    let live_mtu = live.and_then(as_mtu);
+    if update.mtu != live_mtu {
+        if let Some(m) = update.mtu {
+            out.push(mk("set", &["mtu", m.to_string().as_str()], format!("{name}: MTU → {m}")));
+            created_via_set = true;
+        } else {
+            out.push(mk("delete", &["mtu"], format!("{name}: remove MTU")));
+        }
+    }
+
+    // Enabled state — VyOS models "down" as a valueless `disable` leaf. New vifs default up.
+    let live_enabled = live.map(is_enabled).unwrap_or(true);
+    if update.enabled != live_enabled {
+        if update.enabled {
+            out.push(mk("delete", &["disable"], format!("{name}: enable")));
+        } else {
+            out.push(mk("set", &["disable"], format!("{name}: disable")));
+            created_via_set = true;
+        }
+    }
+
+    // A new VLAN with no other set (e.g. only a parent + id) still needs the node created.
+    if is_new && !created_via_set {
+        out.push(NewConfigChange {
+            op: "set".into(),
+            path: base,
+            summary: format!("Create VLAN {name}"),
+            section: "interfaces".into(),
+            created_by: by,
+        });
+    }
+
+    out
+}
+
+/// Replace any pending changes already targeting `vif_base` paths, then stage `changes`.
+async fn restage_vif(
+    state: &AppState,
+    id: Uuid,
+    targets: &[Vec<String>],
+    changes: Vec<NewConfigChange>,
+) -> Result<Vec<ConfigChange>> {
+    for t in targets {
+        sqlx::query(
+            "DELETE FROM config_changes
+             WHERE router_id = $1 AND status = 'pending' AND path[1:5] = $2",
+        )
+        .bind(id)
+        .bind(t)
+        .execute(&state.db)
+        .await?;
+    }
+    insert_changes(&state.db, id, changes).await
+}
+
+async fn stage_vlan(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<VlanConfigUpdate>,
+) -> Result<Json<Vec<ConfigChange>>> {
+    if !(1..=4094).contains(&body.vlan_id) {
+        return Err(AppError::BadRequest("VLAN ID must be between 1 and 4094".into()));
+    }
+
+    let eth = interface_config(&state, &claims, id, "ethernet").await?;
+    let changes = diff_vlan(&eth, &body, claims.sub);
+
+    // Clear stale pending changes for the target vif (and the original, on a move).
+    let mut targets = vec![vif_base(&body.parent, body.vlan_id)];
+    if let (Some(op), Some(ovid)) = (&body.original_parent, body.original_vlan_id) {
+        if op != &body.parent || ovid != body.vlan_id {
+            targets.push(vif_base(op, ovid));
+        }
+    }
+
+    let inserted = restage_vif(&state, id, &targets, changes).await?;
+    Ok(Json(inserted))
+}
+
+async fn delete_vlan(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<VlanDelete>,
+) -> Result<Json<Vec<ConfigChange>>> {
+    authorize_router(&state.db, &claims, id).await?;
+
+    let base = vif_base(&body.parent, body.vlan_id);
+    let change = NewConfigChange {
+        op: "delete".into(),
+        path: base.clone(),
+        summary: format!("Delete VLAN {}.{}", body.parent, body.vlan_id),
+        section: "interfaces".into(),
+        created_by: Some(claims.sub),
+    };
+
+    let inserted = restage_vif(&state, id, &[base], vec![change]).await?;
+    Ok(Json(inserted))
 }
 
 async fn list_bonding(

@@ -74,8 +74,8 @@ export default function OpenvpnPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchOpenvpn(deviceId));
       setStatus("ready");
@@ -123,6 +123,7 @@ export default function OpenvpnPage() {
             emptyMessage="No OpenVPN interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create OpenVPN</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>

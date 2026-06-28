@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, ArrowUp, ArrowDown, X } from "lucide-react";
+import { Search, ArrowUp, ArrowDown, RotateCw, X } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 
 export interface Column<T> {
   key: string;
@@ -33,6 +34,7 @@ export function DataTable<T>({
   emptyMessage = "No rows.",
   toolbar,
   actions,
+  onRefresh,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -44,8 +46,21 @@ export function DataTable<T>({
   toolbar?: React.ReactNode;
   /** Trailing per-row actions cell (e.g. edit/delete). Does not trigger row selection. */
   actions?: (row: T) => React.ReactNode;
+  /** When provided, renders a Refresh button that re-runs this in place (spinner managed here). */
+  onRefresh?: () => void | Promise<void>;
 }) {
   const [query, setQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (!onRefresh || refreshing) return;
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -212,6 +227,11 @@ export function DataTable<T>({
         ))}
 
         <div className="ml-auto flex items-center gap-3">
+          {onRefresh && (
+            <Button kind="secondary" size="sm" icon={RotateCw} onClick={handleRefresh} disabled={refreshing}>
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+          )}
           {toolbar}
           <span className="text-[12px] text-[var(--qz-fg-4)]">
             {displayed.length} {displayed.length === 1 ? "row" : "rows"}

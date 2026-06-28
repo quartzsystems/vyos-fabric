@@ -51,8 +51,8 @@ export default function VtiPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (mode: "load" | "refresh" = "load") => {
+    if (mode === "load") setStatus("loading");
     try {
       setRows(await fetchVti(deviceId));
       setStatus("ready");
@@ -100,6 +100,7 @@ export default function VtiPage() {
             emptyMessage="No VTI interfaces configured."
             toolbar={<Button kind="primary" size="sm" icon={Plus}>Create VTI</Button>}
             actions={() => <RowActions />}
+            onRefresh={() => load("refresh")}
           />
         )}
       </div>
