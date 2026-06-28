@@ -10,12 +10,17 @@ import {
 import {
   commitChanges,
   ConfigChange,
+  deleteNat44Rule,
   deleteVlan,
   discardAllChanges,
   discardChange,
   EthernetConfigUpdate,
   fetchChanges,
+  GlobalOptionsUpdate,
+  Nat44RuleUpdate,
   stageEthernet,
+  stageGlobalOptions,
+  stageNat44Rule,
   stageSystem,
   stageVlan,
   SystemUpdate,
@@ -36,6 +41,9 @@ interface ConfigChangesState {
   stageVlanChanges: (update: VlanConfigUpdate) => Promise<ConfigChange[]>;
   removeVlan: (parent: string, vlanId: number) => Promise<ConfigChange[]>;
   stageEthernetChanges: (update: EthernetConfigUpdate) => Promise<ConfigChange[]>;
+  stageFirewallGlobalOptions: (update: GlobalOptionsUpdate) => Promise<ConfigChange[]>;
+  stageNat44Rule: (update: Nat44RuleUpdate) => Promise<ConfigChange[]>;
+  removeNat44Rule: (section: "source" | "destination", rule: number) => Promise<ConfigChange[]>;
   discardOne: (changeId: string) => Promise<void>;
   discardAll: () => Promise<void>;
   commit: () => Promise<boolean>;
@@ -132,6 +140,42 @@ export function ConfigChangesProvider({ children }: { children: React.ReactNode 
     [deviceId, announce, setToast],
   );
 
+  const stageFirewallGlobalOptions = useCallback(
+    async (update: GlobalOptionsUpdate) => {
+      if (!deviceId) {
+        setToast("No device selected.");
+        return [];
+      }
+      const staged = await stageGlobalOptions(deviceId, update);
+      return announce(staged, "No changes — global options already match.");
+    },
+    [deviceId, announce, setToast],
+  );
+
+  const stageNat44RuleChange = useCallback(
+    async (update: Nat44RuleUpdate) => {
+      if (!deviceId) {
+        setToast("No device selected.");
+        return [];
+      }
+      const staged = await stageNat44Rule(deviceId, update);
+      return announce(staged, "No changes — rule already matches.");
+    },
+    [deviceId, announce, setToast],
+  );
+
+  const removeNat44Rule = useCallback(
+    async (section: "source" | "destination", rule: number) => {
+      if (!deviceId) {
+        setToast("No device selected.");
+        return [];
+      }
+      const staged = await deleteNat44Rule(deviceId, section, rule);
+      return announce(staged, "Nothing to delete.");
+    },
+    [deviceId, announce, setToast],
+  );
+
   const discardOne = useCallback(
     async (changeId: string) => {
       if (!deviceId) return;
@@ -183,6 +227,9 @@ export function ConfigChangesProvider({ children }: { children: React.ReactNode 
         stageVlanChanges,
         removeVlan,
         stageEthernetChanges,
+        stageFirewallGlobalOptions,
+        stageNat44Rule: stageNat44RuleChange,
+        removeNat44Rule,
         discardOne,
         discardAll,
         commit,

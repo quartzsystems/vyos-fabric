@@ -540,10 +540,13 @@ export interface NatRule {
   description: string | null;
   interface: string | null;
   source: string | null;
+  source_port: string | null;
   destination: string | null;
+  destination_port: string | null;
   translation: string | null;
   translation_port: string | null;
   protocol: string | null;
+  exclude: boolean;
   log: boolean;
   enabled: boolean;
 }
@@ -985,6 +988,45 @@ export function fetchCgnat(deviceId: string): Promise<CgnatConfig> {
   return request(`/routers/${deviceId}/nat/cgnat`);
 }
 
+/// Desired state for a single NAT44 rule. `section` picks source (SNAT) vs
+/// destination (DNAT); null/empty fields are staged as deletes. `original_rule`
+/// carries the edited rule's number so a renumber is staged as delete-old + create-new.
+export interface Nat44RuleUpdate {
+  section: "source" | "destination";
+  rule: number;
+  description: string | null;
+  interface: string | null;
+  source_address: string | null;
+  source_port: string | null;
+  destination_address: string | null;
+  destination_port: string | null;
+  translation_address: string | null;
+  translation_port: string | null;
+  protocol: string | null;
+  exclude: boolean;
+  log: boolean;
+  enabled: boolean;
+  original_rule: number | null;
+}
+
+export function stageNat44Rule(deviceId: string, body: Nat44RuleUpdate): Promise<ConfigChange[]> {
+  return request(`/routers/${deviceId}/nat/nat44/stage`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteNat44Rule(
+  deviceId: string,
+  section: "source" | "destination",
+  rule: number,
+): Promise<ConfigChange[]> {
+  return request(`/routers/${deviceId}/nat/nat44/delete`, {
+    method: "POST",
+    body: JSON.stringify({ section, rule }),
+  });
+}
+
 // ── System config ────────────────────────────────────────────────────────────
 
 export function fetchSystem(deviceId: string): Promise<DeviceSystemConfig> {
@@ -1011,6 +1053,90 @@ export function fetchInterfaceStats(deviceId: string): Promise<InterfaceStat[]> 
 
 export function stageSystem(deviceId: string, body: SystemUpdate): Promise<ConfigChange[]> {
   return request(`/routers/${deviceId}/system/stage`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// ── Firewall: global options ─────────────────────────────────────────────────
+
+/** A single state-policy entry (`firewall global-options state-policy <state>`). */
+export interface StatePolicyEntry {
+  /** "accept" | "reject" | "drop", or null when the state has no policy. */
+  action: string | null;
+  log: boolean;
+  /** Syslog level for matched packets, or null when unset. */
+  log_level: string | null;
+}
+
+export interface StatePolicy {
+  established: StatePolicyEntry;
+  related: StatePolicyEntry;
+  invalid: StatePolicyEntry;
+}
+
+/**
+ * Live `firewall global-options` config. Each toggle/select holds the raw VyOS
+ * value (e.g. "enable", "disable", "strict") or null when the option is absent
+ * (device default).
+ */
+export interface GlobalOptionsConfig {
+  all_ping: string | null;
+  broadcast_ping: string | null;
+  directed_broadcast: string | null;
+  ip_src_route: string | null;
+  ipv6_src_route: string | null;
+  ipv6_receive_redirects: string | null;
+  receive_redirects: string | null;
+  send_redirects: string | null;
+  log_martians: string | null;
+  syn_cookies: string | null;
+  twa_hazards_protection: string | null;
+  apply_to_bridge: string | null;
+  source_validation: string | null;
+  ipv6_source_validation: string | null;
+  resolver_cache: boolean;
+  resolver_interval: string | null;
+  state_policy: StatePolicy;
+}
+
+/**
+ * Desired global options. The UI submits the full picture, so a null/empty value
+ * means "unset" — the backend stages a delete when the device currently has it.
+ */
+export interface GlobalOptionsUpdate {
+  all_ping?: string | null;
+  broadcast_ping?: string | null;
+  directed_broadcast?: string | null;
+  ip_src_route?: string | null;
+  ipv6_src_route?: string | null;
+  ipv6_receive_redirects?: string | null;
+  receive_redirects?: string | null;
+  send_redirects?: string | null;
+  log_martians?: string | null;
+  syn_cookies?: string | null;
+  twa_hazards_protection?: string | null;
+  apply_to_bridge?: string | null;
+  source_validation?: string | null;
+  ipv6_source_validation?: string | null;
+  resolver_cache?: boolean;
+  resolver_interval?: string | null;
+  state_policy?: {
+    established: StatePolicyEntry;
+    related: StatePolicyEntry;
+    invalid: StatePolicyEntry;
+  };
+}
+
+export function fetchGlobalOptions(deviceId: string): Promise<GlobalOptionsConfig> {
+  return request(`/routers/${deviceId}/firewall/global-options`);
+}
+
+export function stageGlobalOptions(
+  deviceId: string,
+  body: GlobalOptionsUpdate,
+): Promise<ConfigChange[]> {
+  return request(`/routers/${deviceId}/firewall/global-options/stage`, {
     method: "POST",
     body: JSON.stringify(body),
   });

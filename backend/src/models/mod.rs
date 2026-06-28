@@ -1,4 +1,5 @@
 pub mod config;
+pub mod firewall;
 pub mod interfaces;
 pub mod nat;
 pub mod router;
@@ -8,6 +9,7 @@ pub mod system;
 pub mod user;
 
 pub use config::*;
+pub use firewall::*;
 pub use interfaces::*;
 pub use nat::*;
 pub use router::*;

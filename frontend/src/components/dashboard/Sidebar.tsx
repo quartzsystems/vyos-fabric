@@ -1,6 +1,6 @@
 "use client";
 
-import { Gauge, Settings, Search, LogOut, Network, Route, ArrowLeftRight, Shield, Server, LucideIcon, Building2, ArrowLeft, ChevronDown, ChevronRight, Cable, Tags, Combine, Waypoints, Box, Globe, Spline, Repeat, ShieldCheck, KeyRound, ShieldHalf, Plug, Layers, LockKeyhole, Cylinder, EthernetPort, GitFork, Boxes, Wifi, RadioTower, Router, Share2, Forward, ServerCog, FolderSync, Workflow, Terminal, RefreshCw, Zap, Lock, Radar, Cast, Activity, Clock, PlugZap, Megaphone, Bot, BarChart3, SquareTerminal, FileDown, Radio, Shuffle } from "lucide-react";
+import { Gauge, Settings, Search, LogOut, Network, Route, ArrowLeftRight, Shield, Server, LucideIcon, Building2, ArrowLeft, ChevronDown, ChevronRight, Cable, Tags, Combine, Waypoints, Box, Globe, Spline, Repeat, ShieldCheck, KeyRound, ShieldHalf, Plug, Layers, LockKeyhole, Cylinder, EthernetPort, GitFork, Boxes, Wifi, RadioTower, Router, Share2, Forward, ServerCog, FolderSync, Workflow, Terminal, RefreshCw, Zap, Lock, Radar, Cast, Activity, Clock, PlugZap, Megaphone, Bot, BarChart3, SquareTerminal, FileDown, Radio, Shuffle, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -96,7 +96,15 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
         { id: "cgnat", label: "CGNAT", href: `${basePath}/nat/cgnat`, icon: Boxes },
       ],
     },
-    { id: "firewall",    label: "Firewall",   icon: Shield,          href: `${basePath}/firewall` },
+    {
+      id: "firewall",
+      label: "Firewall",
+      icon: Shield,
+      href: `${basePath}/firewall`,
+      children: [
+        { id: "global-options", label: "Global Options", href: `${basePath}/firewall/global-options`, icon: SlidersHorizontal },
+      ],
+    },
     {
       id: "services",
       label: "Services",

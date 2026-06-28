@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod config;
+pub mod firewall;
 pub mod interfaces;
 pub mod nat;
 pub mod routers;
@@ -19,7 +20,7 @@ pub fn router(state: AppState) -> Router<AppState> {
     // Everything here requires a valid session (cookie or Bearer).
     let protected = Router::new()
         .route("/auth/me", get(auth::me))
-        .nest("/routers", routers::router().merge(config::router()).merge(interfaces::router()).merge(services::router()).merge(nat::router()))
+        .nest("/routers", routers::router().merge(config::router()).merge(interfaces::router()).merge(services::router()).merge(nat::router()).merge(firewall::router()))
         .nest("/sites", sites::router())
         .merge(admin)
         .layer(middleware::from_fn_with_state(state, require_auth));
