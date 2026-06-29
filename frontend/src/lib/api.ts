@@ -539,9 +539,15 @@ export interface NatRule {
   rule: string;
   description: string | null;
   interface: string | null;
+  /** True when `interface` is a firewall interface-group reference rather than a name. */
+  interface_group: boolean;
   source: string | null;
+  /** Group match (e.g. "network-group NET-INSIDE-v4"); shown when no literal source address. */
+  source_group: string | null;
   source_port: string | null;
   destination: string | null;
+  /** Group match (e.g. "address-group WEB-SERVERS"); shown when no literal destination address. */
+  destination_group: string | null;
   destination_port: string | null;
   translation: string | null;
   translation_port: string | null;
@@ -551,9 +557,21 @@ export interface NatRule {
   enabled: boolean;
 }
 
+/// A 1-to-1 (static) NAT mapping — an internal address bound bidirectionally to an
+/// external address. Backed by a paired source + destination rule sharing one number.
+export interface StaticNatMapping {
+  rule: string;
+  description: string | null;
+  interface: string | null;
+  internal_address: string | null;
+  external_address: string | null;
+  enabled: boolean;
+}
+
 export interface Nat44Config {
   source: NatRule[];
   destination: NatRule[];
+  static_nat: StaticNatMapping[];
 }
 
 export interface Nat64Config {
@@ -996,6 +1014,8 @@ export interface Nat44RuleUpdate {
   rule: number;
   description: string | null;
   interface: string | null;
+  /** When true, stage the interface as a `group <name>` reference rather than `name <iface>`. */
+  interface_group: boolean;
   source_address: string | null;
   source_port: string | null;
   destination_address: string | null;
@@ -1024,6 +1044,34 @@ export function deleteNat44Rule(
   return request(`/routers/${deviceId}/nat/nat44/delete`, {
     method: "POST",
     body: JSON.stringify({ section, rule }),
+  });
+}
+
+/// Desired state for a 1-to-1 (static) NAT mapping. Staged as a paired source +
+/// destination rule sharing `rule`; null/empty addresses are staged as deletes.
+/// `original_rule` carries the edited mapping's number so a renumber is staged as
+/// delete-old + create-new on both halves.
+export interface StaticNatUpdate {
+  rule: number;
+  description: string | null;
+  interface: string | null;
+  internal_address: string | null;
+  external_address: string | null;
+  enabled: boolean;
+  original_rule: number | null;
+}
+
+export function stageStaticNat(deviceId: string, body: StaticNatUpdate): Promise<ConfigChange[]> {
+  return request(`/routers/${deviceId}/nat/nat44/static/stage`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteStaticNat(deviceId: string, rule: number): Promise<ConfigChange[]> {
+  return request(`/routers/${deviceId}/nat/nat44/static/delete`, {
+    method: "POST",
+    body: JSON.stringify({ rule }),
   });
 }
 
@@ -1130,6 +1178,11 @@ export interface GlobalOptionsUpdate {
 
 export function fetchGlobalOptions(deviceId: string): Promise<GlobalOptionsConfig> {
   return request(`/routers/${deviceId}/firewall/global-options`);
+}
+
+/// Names of all `firewall group interface-group` definitions, for interface-group pickers.
+export function fetchInterfaceGroups(deviceId: string): Promise<string[]> {
+  return request(`/routers/${deviceId}/firewall/interface-groups`);
 }
 
 export function stageGlobalOptions(

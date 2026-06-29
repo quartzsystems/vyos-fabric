@@ -11,6 +11,7 @@ import {
   commitChanges,
   ConfigChange,
   deleteNat44Rule,
+  deleteStaticNat,
   deleteVlan,
   discardAllChanges,
   discardChange,
@@ -21,8 +22,10 @@ import {
   stageEthernet,
   stageGlobalOptions,
   stageNat44Rule,
+  stageStaticNat,
   stageSystem,
   stageVlan,
+  StaticNatUpdate,
   SystemUpdate,
   VlanConfigUpdate,
 } from "./api";
@@ -44,6 +47,8 @@ interface ConfigChangesState {
   stageFirewallGlobalOptions: (update: GlobalOptionsUpdate) => Promise<ConfigChange[]>;
   stageNat44Rule: (update: Nat44RuleUpdate) => Promise<ConfigChange[]>;
   removeNat44Rule: (section: "source" | "destination", rule: number) => Promise<ConfigChange[]>;
+  stageStaticNat: (update: StaticNatUpdate) => Promise<ConfigChange[]>;
+  removeStaticNat: (rule: number) => Promise<ConfigChange[]>;
   discardOne: (changeId: string) => Promise<void>;
   discardAll: () => Promise<void>;
   commit: () => Promise<boolean>;
@@ -176,6 +181,30 @@ export function ConfigChangesProvider({ children }: { children: React.ReactNode 
     [deviceId, announce, setToast],
   );
 
+  const stageStaticNatChange = useCallback(
+    async (update: StaticNatUpdate) => {
+      if (!deviceId) {
+        setToast("No device selected.");
+        return [];
+      }
+      const staged = await stageStaticNat(deviceId, update);
+      return announce(staged, "No changes — mapping already matches.");
+    },
+    [deviceId, announce, setToast],
+  );
+
+  const removeStaticNat = useCallback(
+    async (rule: number) => {
+      if (!deviceId) {
+        setToast("No device selected.");
+        return [];
+      }
+      const staged = await deleteStaticNat(deviceId, rule);
+      return announce(staged, "Nothing to delete.");
+    },
+    [deviceId, announce, setToast],
+  );
+
   const discardOne = useCallback(
     async (changeId: string) => {
       if (!deviceId) return;
@@ -230,6 +259,8 @@ export function ConfigChangesProvider({ children }: { children: React.ReactNode 
         stageFirewallGlobalOptions,
         stageNat44Rule: stageNat44RuleChange,
         removeNat44Rule,
+        stageStaticNat: stageStaticNatChange,
+        removeStaticNat,
         discardOne,
         discardAll,
         commit,

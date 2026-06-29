@@ -29,6 +29,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/{id}/firewall/global-options", get(get_global_options))
         .route("/{id}/firewall/global-options/stage", post(stage_global_options))
+        .route("/{id}/firewall/interface-groups", get(get_interface_groups))
 }
 
 const BASE: [&str; 2] = ["firewall", "global-options"];
@@ -124,6 +125,33 @@ async fn get_global_options(
 ) -> Result<Json<GlobalOptionsConfig>> {
     let client = fetch_client(&state, &claims, id).await?;
     Ok(Json(gather_global_options(&client).await?))
+}
+
+/// Names of all `firewall group interface-group` definitions on the device, sorted.
+/// Populates interface-group pickers (e.g. a NAT outbound/inbound interface field).
+/// An absent subtree (no groups defined) yields an empty list rather than an error.
+async fn get_interface_groups(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<String>>> {
+    let client = fetch_client(&state, &claims, id).await?;
+    let resp = client
+        .show_config(&["firewall", "group", "interface-group"])
+        .await
+        .map_err(gateway_err)?;
+    // VyOS may return the subtree directly ({WAN:.., LAN:..}) or nested under the
+    // requested leaf ({"interface-group": {WAN:.., LAN:..}}); descend into the latter
+    // so the picker lists the actual group names rather than "interface-group".
+    let mut names: Vec<String> = if resp["success"].as_bool() == Some(true) {
+        let data = &resp["data"];
+        let node = data.get("interface-group").unwrap_or(data);
+        node.as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    names.sort();
+    Ok(Json(names))
 }
 
 // ── staging ─────────────────────────────────────────────────────────────────

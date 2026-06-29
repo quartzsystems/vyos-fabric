@@ -10,7 +10,8 @@ use crate::{
     error::{AppError, Result},
     models::{
         CgnatConfig, CgnatPool, CgnatRule, ConfigChange, Nat44Config, Nat44RuleDelete,
-        Nat44RuleUpdate, Nat64Config, Nat66Config, NatRule, NewConfigChange,
+        Nat44RuleUpdate, Nat64Config, Nat66Config, NatRule, NewConfigChange, StaticNatDelete,
+        StaticNatMapping, StaticNatUpdate,
     },
     state::AppState,
     vyos::client::VyosClient,
@@ -24,6 +25,8 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/nat/nat44", get(get_nat44))
         .route("/{id}/nat/nat44/stage", post(stage_nat44))
         .route("/{id}/nat/nat44/delete", post(delete_nat44))
+        .route("/{id}/nat/nat44/static/stage", post(stage_static))
+        .route("/{id}/nat/nat44/static/delete", post(delete_static))
         .route("/{id}/nat/nat64", get(get_nat64))
         .route("/{id}/nat/nat66", get(get_nat66))
         .route("/{id}/nat/cgnat", get(get_cgnat))
@@ -76,6 +79,14 @@ fn addr_or_prefix(rule: &Value, section: &str) -> Option<String> {
     child_str(s, "address").or_else(|| child_str(s, "prefix"))
 }
 
+/// A `group { <type> <name> }` reference under a `source`/`destination` section,
+/// rendered as `<type> <name>` (e.g. `network-group NET-INSIDE-v4`).
+fn group_ref(rule: &Value, section: &str) -> Option<String> {
+    let obj = rule.get(section)?.get("group")?.as_object()?;
+    let (ty, name) = obj.iter().next()?;
+    name.as_str().map(|n| format!("{ty} {n}"))
+}
+
 /// Translation target: an address, `masquerade`, or a referenced pool.
 fn translation(rule: &Value) -> Option<String> {
     nested_str(rule, "translation", "address")
@@ -85,15 +96,29 @@ fn translation(rule: &Value) -> Option<String> {
 }
 
 fn parse_rule(num: &str, cfg: &Value, iface_key: Option<&str>) -> NatRule {
-    // 1.4+: `<iface_key> name <iface>`; 1.3: `<iface_key> <iface>`.
-    let interface = iface_key.and_then(|k| nested_str(cfg, k, "name").or_else(|| child_str(cfg, k)));
+    // 1.4+: `<iface_key> name <iface>` or `<iface_key> group <iface-group>`; 1.3: `<iface_key> <iface>`.
+    let (interface, interface_group) = match iface_key {
+        Some(k) => {
+            if let Some(n) = nested_str(cfg, k, "name") {
+                (Some(n), false)
+            } else if let Some(g) = nested_str(cfg, k, "group") {
+                (Some(g), true)
+            } else {
+                (child_str(cfg, k), false)
+            }
+        }
+        None => (None, false),
+    };
     NatRule {
         rule: num.to_string(),
         description: child_str(cfg, "description"),
         interface,
+        interface_group,
         source: addr_or_prefix(cfg, "source"),
+        source_group: group_ref(cfg, "source"),
         source_port: nested_str(cfg, "source", "port"),
         destination: addr_or_prefix(cfg, "destination"),
+        destination_group: group_ref(cfg, "destination"),
         destination_port: nested_str(cfg, "destination", "port"),
         translation: translation(cfg),
         translation_port: nested_str(cfg, "translation", "port"),
@@ -114,6 +139,50 @@ fn parse_rules(node: &Value, section: &str, iface_key: Option<&str>) -> Vec<NatR
     out
 }
 
+/// Splits the live `nat` config into source/destination rule lists plus 1-to-1
+/// (static) mappings. A rule number present in both `source` and `destination` whose
+/// addresses mirror (source `source`→`translation` equals destination
+/// `translation`←`destination`) is lifted into `static_nat` and removed from both lists.
+fn split_static(node: &Value) -> (Vec<NatRule>, Vec<NatRule>, Vec<StaticNatMapping>) {
+    let mut source = parse_rules(node, "source", Some("outbound-interface"));
+    let mut destination = parse_rules(node, "destination", Some("inbound-interface"));
+    let mut statics: Vec<StaticNatMapping> = Vec::new();
+    let mut paired: Vec<String> = Vec::new();
+
+    if let (Some(src), Some(dst)) =
+        (node["source"]["rule"].as_object(), node["destination"]["rule"].as_object())
+    {
+        for (num, s) in src {
+            let Some(d) = dst.get(num) else { continue };
+            let internal = nested_str(s, "source", "address");
+            let external = nested_str(s, "translation", "address");
+            // Mirror check: both addresses present and swapped on the destination rule.
+            if internal.is_none()
+                || external.is_none()
+                || nested_str(d, "destination", "address") != external
+                || nested_str(d, "translation", "address") != internal
+            {
+                continue;
+            }
+            statics.push(StaticNatMapping {
+                rule: num.clone(),
+                description: child_str(s, "description").or_else(|| child_str(d, "description")),
+                interface: nested_str(s, "outbound-interface", "name")
+                    .or_else(|| child_str(s, "outbound-interface")),
+                internal_address: internal,
+                external_address: external,
+                enabled: is_enabled(s) && is_enabled(d),
+            });
+            paired.push(num.clone());
+        }
+    }
+
+    source.retain(|r| !paired.contains(&r.rule));
+    destination.retain(|r| !paired.contains(&r.rule));
+    statics.sort_by(|a, b| a.rule.parse::<u64>().unwrap_or(0).cmp(&b.rule.parse::<u64>().unwrap_or(0)));
+    (source, destination, statics)
+}
+
 // ── handlers ───────────────────────────────────────────────────────────────────
 
 async fn get_nat44(
@@ -123,10 +192,8 @@ async fn get_nat44(
 ) -> Result<Json<Nat44Config>> {
     let client = fetch_client(&state, &claims, id).await?;
     let data = fetch_node(&client, &["nat"]).await?;
-    Ok(Json(Nat44Config {
-        source: parse_rules(&data, "source", Some("outbound-interface")),
-        destination: parse_rules(&data, "destination", Some("inbound-interface")),
-    }))
+    let (source, destination, static_nat) = split_static(&data);
+    Ok(Json(Nat44Config { source, destination, static_nat }))
 }
 
 // ── NAT44 staging ────────────────────────────────────────────────────────────
@@ -224,25 +291,29 @@ fn diff_nat44(live_node: &Value, body: &Nat44RuleUpdate, by: Uuid) -> Vec<NewCon
     nat_leaf(&base, &["translation", "address"], live.and_then(|v| nested_str(v, "translation", "address")), &body.translation_address, &name, "translation address", by, &mut out, &mut created);
     nat_leaf(&base, &["translation", "port"], live.and_then(|v| nested_str(v, "translation", "port")), &body.translation_port, &name, "translation port", by, &mut out, &mut created);
 
-    // Interface: written as `<key> name <iface>` (1.4+), read tolerates the 1.3 form.
-    // Clearing removes the whole `<key>` node so either form is dropped.
-    let live_iface = live.and_then(|v| nested_str(v, iface_key, "name").or_else(|| child_str(v, iface_key)));
+    // Interface: written as `<key> name <iface>` or `<key> group <iface-group>` (1.4+),
+    // read tolerates the 1.3 bare form. Clearing or switching kind removes the whole
+    // `<key>` node first so the stale form is dropped before the new one is set.
+    let (live_iface, live_group) = match live {
+        Some(v) if nested_str(v, iface_key, "name").is_some() => (nested_str(v, iface_key, "name"), false),
+        Some(v) if nested_str(v, iface_key, "group").is_some() => (nested_str(v, iface_key, "group"), true),
+        Some(v) => (child_str(v, iface_key), false),
+        None => (None, false),
+    };
     let new_iface = body.interface.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty());
-    if new_iface != live_iface.as_deref() {
-        match new_iface {
-            Some(i) => {
-                let mut path = base.clone();
-                path.extend([iface_key.to_string(), "name".to_string(), i.to_string()]);
-                out.push(NewConfigChange { op: "set".into(), path, summary: format!("{name}: {iface_key} → {i}"), section: "nat".into(), created_by: by });
-                created = true;
-            }
-            None => {
-                if live_iface.is_some() {
-                    let mut path = base.clone();
-                    path.push(iface_key.into());
-                    out.push(NewConfigChange { op: "delete".into(), path, summary: format!("{name}: remove {iface_key}"), section: "nat".into(), created_by: by });
-                }
-            }
+    if (new_iface, body.interface_group) != (live_iface.as_deref(), live_group) {
+        // Drop any existing form before re-setting (covers value changes and name↔group switches).
+        if live_iface.is_some() {
+            let mut path = base.clone();
+            path.push(iface_key.into());
+            out.push(NewConfigChange { op: "delete".into(), path, summary: format!("{name}: remove {iface_key}"), section: "nat".into(), created_by: by });
+        }
+        if let Some(i) = new_iface {
+            let kind = if body.interface_group { "group" } else { "name" };
+            let mut path = base.clone();
+            path.extend([iface_key.to_string(), kind.to_string(), i.to_string()]);
+            out.push(NewConfigChange { op: "set".into(), path, summary: format!("{name}: {iface_key} {kind} → {i}"), section: "nat".into(), created_by: by });
+            created = true;
         }
     }
 
@@ -365,6 +436,113 @@ async fn delete_nat44(
     };
 
     let inserted = restage_nat(&state, id, &[base], vec![change]).await?;
+    Ok(Json(inserted))
+}
+
+// ── Static (1-to-1) NAT staging ────────────────────────────────────────────────
+
+/// Builds the source + destination `Nat44RuleUpdate`s backing one 1-to-1 mapping.
+/// The source rule maps `internal → external`; the destination rule mirrors it
+/// (`external → internal`). All non-static leaves are left `None` so editing a
+/// mapping cleans up any stray ports/protocol on the underlying rules.
+fn static_pair(body: &StaticNatUpdate) -> (Nat44RuleUpdate, Nat44RuleUpdate) {
+    let src = Nat44RuleUpdate {
+        section: "source".into(),
+        rule: body.rule,
+        description: body.description.clone(),
+        interface: body.interface.clone(),
+        interface_group: false,
+        source_address: body.internal_address.clone(),
+        source_port: None,
+        destination_address: None,
+        destination_port: None,
+        translation_address: body.external_address.clone(),
+        translation_port: None,
+        protocol: None,
+        exclude: false,
+        log: false,
+        enabled: body.enabled,
+        original_rule: body.original_rule,
+    };
+    let dst = Nat44RuleUpdate {
+        section: "destination".into(),
+        rule: body.rule,
+        description: body.description.clone(),
+        interface: body.interface.clone(),
+        interface_group: false,
+        source_address: None,
+        source_port: None,
+        destination_address: body.external_address.clone(),
+        destination_port: None,
+        translation_address: body.internal_address.clone(),
+        translation_port: None,
+        protocol: None,
+        exclude: false,
+        log: false,
+        enabled: body.enabled,
+        original_rule: body.original_rule,
+    };
+    (src, dst)
+}
+
+async fn stage_static(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<StaticNatUpdate>,
+) -> Result<Json<Vec<ConfigChange>>> {
+    if !(1..=999999).contains(&body.rule) {
+        return Err(AppError::BadRequest("rule number must be between 1 and 999999".into()));
+    }
+
+    let client = fetch_client(&state, &claims, id).await?;
+    let data = fetch_node(&client, &["nat"]).await?;
+
+    let (src, dst) = static_pair(&body);
+    let mut changes = diff_nat44(&data, &src, claims.sub);
+    changes.extend(diff_nat44(&data, &dst, claims.sub));
+
+    // Both halves of the pair are restaged together (and their originals on a renumber).
+    let mut targets = vec![rule_base("source", body.rule), rule_base("destination", body.rule)];
+    if let Some(o) = body.original_rule {
+        if o != body.rule {
+            targets.push(rule_base("source", o));
+            targets.push(rule_base("destination", o));
+        }
+    }
+
+    let inserted = restage_nat(&state, id, &targets, changes).await?;
+    Ok(Json(inserted))
+}
+
+async fn delete_static(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<StaticNatDelete>,
+) -> Result<Json<Vec<ConfigChange>>> {
+    authorize_router(&state.db, &claims, id).await?;
+
+    let src = rule_base("source", body.rule);
+    let dst = rule_base("destination", body.rule);
+    let changes = vec![
+        NewConfigChange {
+            op: "delete".into(),
+            path: src.clone(),
+            summary: format!("Delete 1-to-1 NAT rule {} (source)", body.rule),
+            section: "nat".into(),
+            created_by: Some(claims.sub),
+        },
+        NewConfigChange {
+            op: "delete".into(),
+            path: dst.clone(),
+            summary: format!("Delete 1-to-1 NAT rule {} (destination)", body.rule),
+            section: "nat".into(),
+            created_by: Some(claims.sub),
+        },
+    ];
+
+    let inserted = restage_nat(&state, id, &[src, dst], changes).await?;
     Ok(Json(inserted))
 }
 
